@@ -148,6 +148,7 @@ Rules for remote-control sessions:
 - The user revokes access anytime with **Stop sharing** on the Remote ON dropdown; the URL then stops working permanently. If the connection dies, ask the user for a fresh URL.
 - Never print, log, or share the tunnel URL: whoever has it can control the user's tab as them.
 - Screen recording is not available on remote-control sessions.
+- Tab groups: rename the shared tab's Chrome group with `playwriter session update <id> --tab-group <name>` (optional `--tab-group-color`). Do not pass `--tab-group` on `session new --remote` — remote sessions cannot create tabs.
 
 **Use cases:** the user is logged into a website and wants you (a remote agent like Devin, a cloud bot, or a CLI agent on another machine) to act in their authenticated session without sharing passwords.
 

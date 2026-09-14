@@ -154,6 +154,7 @@ describe('remote-control', () => {
 
   test('extension method guards', () => {
     expect(getRemoteExtensionMethodRejection('forwardCDPCommand')).toBeNull()
+    expect(getRemoteExtensionMethodRejection('updateTabGroup')).toBeNull()
     expect(getRemoteExtensionMethodRejection('createInitialTab')).toContain('shared remote-control browser tab')
     expect(getRemoteExtensionMethodRejection('startRecording')).toMatchInlineSnapshot(
       `"Screen recording is not supported on shared remote-control tabs yet."`,

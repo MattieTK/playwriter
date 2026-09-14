@@ -441,7 +441,17 @@ cli
     // local relay dials the tunnel, so later `playwriter -s N -e ...` calls need
     // no extra flags.
     if (options.remote) {
-      warnTabGroupUnsupported('remote-control sessions')
+      // Remote-control can't create tabs, so --tab-group at session new does not
+      // attach a group to new pages. Renaming the shared tab's group works via
+      // `playwriter session update --tab-group` (extension allows updateTabGroup
+      // for remoteScope). Warn only when the unused create-time flags are passed.
+      if (tabGroup || tabGroupColor) {
+        console.error(
+          pc.yellow(
+            'Warning: --tab-group/--tab-group-color on session new are ignored for remote-control (no new tabs). Use `playwriter session update <id> --tab-group <name>` to rename the shared tab group.',
+          ),
+        )
+      }
       await ensureRelayForSessionCreation(isLocal)
       const serverUrl = await getServerUrl(options.host)
       try {

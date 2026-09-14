@@ -125,7 +125,7 @@ Tab groups are **cosmetic**:
 - Dragging an unrelated tab into any playwriter group connects it.
 - Moving a whole group to another window (Chrome's "Move group to new window") keeps the tabs connected.
 
-Only extension sessions support tab groups. Headless, direct CDP, and cloud sessions have no browser UI to group.
+Extension sessions support tab groups for tabs they create. Remote-control sessions can rename the shared tab's group with `playwriter session update --tab-group` (they cannot create new tabs). Headless, direct CDP, and cloud sessions have no browser UI to group.
 
 ## Session management
 
