@@ -354,9 +354,7 @@ export function getRemoteExtensionMethodRejection(method: string): string | null
   if (method === 'ghost-browser') {
     return 'Ghost Browser APIs are not available on shared remote-control tabs.'
   }
-  // updateTabGroup is allowed: cosmetic only, and the extension scopes it to
-  // the shared remote-control tab ids (see background.ts). Agents rename the
-  // shared tab's Chrome group with `playwriter session update --tab-group`.
+  // updateTabGroup allowed; extension scopes it to shared tab ids.
   return null
 }
 

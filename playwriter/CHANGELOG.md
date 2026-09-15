@@ -1,12 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Patch Changes
-
-- **Remote control: allow tab group rename** — `playwriter session update --tab-group` now works on shared remote-control tabs. The extension scopes the rename to the shared tab ids instead of rejecting `updateTabGroup`. Creating new tabs (and `--tab-group` on `session new --remote`) remains unsupported.
-
-
 ## 0.6.0
 
 1. **Remote control — share one tab of your browser with a remote agent or person, no local install needed.**

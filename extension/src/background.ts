@@ -897,9 +897,7 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
     return
   }
 
-  // Remote relay connections are scoped to the shared tab: block tab creation,
-  // recording, and Ghost Browser APIs with helpful errors. Tab-group rename is
-  // allowed and scoped to the shared tab ids in the updateTabGroup handler.
+  // Remote scope: block tab creation, recording, Ghost Browser. Tab-group rename allowed.
   if (sink.remoteScope) {
     const rejection = getRemoteExtensionMethodRejection(message.method)
     if (rejection) {
@@ -985,10 +983,7 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
 
           const fromIsDefault = from === DEFAULT_TAB_GROUP_TITLE
           const isRename = to !== from
-          // Remote-control dials only own the shared tab ids on this sink. Those
-          // tabs usually have no session groupKey (the CLI session lives on the
-          // remote agent's relay), so skip the default-group key filter and only
-          // touch the shared set.
+          // Remote scope: only shared tab ids; they often lack session groupKey.
           const remoteTabIds = sink.remoteScope?.tabIds
           let movedTabs = 0
           store.setState((state) => {
@@ -1001,24 +996,23 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
               } else if ((info.groupTitle || DEFAULT_TAB_GROUP_TITLE) !== from) {
                 continue
               }
-              // Only the requesting session's tabs leave the shared default
-              // group. Color-only default updates also stick to keyed tabs so
-              // the explicit color has an owner tab to live on. Remote-control
-              // shared tabs are exempt: they are already scoped by tab id.
+              // Default-group renames only move the requesting session's tabs.
               if (!remoteTabIds && fromIsDefault && (!key || info.groupKey !== key)) {
                 continue
               }
-              const nextTitle = isRename ? to : info.groupTitle
-              const nextColor = color ?? info.groupColor
               const changedTitle = isRename && info.groupTitle !== to
               const changedColor = color !== undefined && info.groupColor !== color
-              // Remote shared tabs may not already carry `from` as groupTitle
-              // (user may have them in another Chrome group). Still rewrite so
-              // syncTabGroup / chrome.tabGroups.update can rename that group.
               if (!remoteTabIds && !changedTitle && !changedColor) {
                 continue
               }
-              if (remoteTabIds && !changedTitle && !changedColor && (info.groupTitle || DEFAULT_TAB_GROUP_TITLE) === (nextTitle || DEFAULT_TAB_GROUP_TITLE) && info.groupColor === nextColor) {
+              const nextTitle = isRename ? to : info.groupTitle || to
+              if (
+                remoteTabIds &&
+                !changedTitle &&
+                !changedColor &&
+                (info.groupTitle || DEFAULT_TAB_GROUP_TITLE) === (nextTitle || DEFAULT_TAB_GROUP_TITLE) &&
+                info.groupColor === (color ?? info.groupColor)
+              ) {
                 continue
               }
               newTabs.set(tabId, {
@@ -1031,25 +1025,22 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
             return { tabs: newTabs }
           })
 
-          // For remote-control, also rename the live Chrome group of each shared
-          // tab even when it was never tracked under `from` (title mismatch).
+          // Remote: rename shared tabs' live group. If the group has foreign tabs,
+          // move only the shared ones into a new group first.
           if (remoteTabIds && remoteTabIds.size > 0) {
             const explicitColor: chrome.tabGroups.ColorEnum | undefined =
               color ||
               Array.from(store.getState().tabs.values()).find((info) => {
                 return (info.groupTitle || DEFAULT_TAB_GROUP_TITLE) === to && info.groupColor
               })?.groupColor
+            const groupColor = explicitColor || colorForTabGroupTitle(to)
             const seenGroupIds = new Set<number>()
             for (const tabId of remoteTabIds) {
               try {
                 const tab = await chrome.tabs.get(tabId)
                 if (tab.groupId === undefined || tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
-                  // Not grouped yet: create a group for this shared tab.
                   const groupId = await chrome.tabs.group({ tabIds: [tabId] })
-                  await chrome.tabGroups.update(groupId, {
-                    title: to,
-                    color: explicitColor || colorForTabGroupTitle(to),
-                  })
+                  await chrome.tabGroups.update(groupId, { title: to, color: groupColor })
                   movedTabs = Math.max(movedTabs, 1)
                   continue
                 }
@@ -1057,13 +1048,23 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
                   continue
                 }
                 seenGroupIds.add(tab.groupId)
-                await chrome.tabGroups.update(tab.groupId, {
-                  title: to,
-                  color: explicitColor || colorForTabGroupTitle(to),
-                })
+                const tabsInGroup = await chrome.tabs.query({ groupId: tab.groupId })
+                const foreign = tabsInGroup.some((t) => t.id !== undefined && !remoteTabIds.has(t.id))
+                if (foreign) {
+                  const sharedIds = tabsInGroup
+                    .map((t) => t.id)
+                    .filter((id): id is number => id !== undefined && remoteTabIds.has(id))
+                  if (sharedIds.length === 0) {
+                    continue
+                  }
+                  const groupId = await chrome.tabs.group({ tabIds: sharedIds })
+                  await chrome.tabGroups.update(groupId, { title: to, color: groupColor })
+                } else {
+                  await chrome.tabGroups.update(tab.groupId, { title: to, color: groupColor })
+                }
                 movedTabs = Math.max(movedTabs, 1)
               } catch (e) {
-                logger.debug('remote updateTabGroup chrome.tabGroups update failed:', e)
+                logger.debug('remote updateTabGroup failed:', e)
               }
             }
             const persisted = await loadManagedTabGroups()
@@ -1071,12 +1072,7 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
             saveManagedTabGroups(persisted)
           }
 
-          // Update live custom groups directly so tabs move/recolor without an
-          // ungroup/regroup flicker. syncTabGroup (triggered by the state
-          // change above) then consolidates duplicates if a group named `to`
-          // already existed. Default-group updates skip this: sync moves the
-          // session's tabs out (rename) or recolors the group (color-only).
-          // Remote-control already updated the shared tab's live group above.
+          // Local custom groups: rename in place when Playwriter owns every tab.
           if (!remoteTabIds && !fromIsDefault) {
             const managedTitles = await getManagedTabGroupTitles()
             if (managedTitles.has(from)) {
