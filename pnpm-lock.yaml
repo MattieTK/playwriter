@@ -346,8 +346,8 @@ importers:
         specifier: ^1.30.0
         version: 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)
       '@strada.sh/light':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.2.1
+        version: 0.2.1
       '@xmorse/playwright-core':
         specifier: workspace:^
         version: link:../playwright/packages/playwright-core
@@ -3268,8 +3268,8 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@strada.sh/light@0.2.0':
-    resolution: {integrity: sha512-IsfZYiLjlt2AJGLo3QCu/4qQJsVwOG+ELKkMYnAWZBa4V4JxhG5qBaLOCmhV/CCbjYZzXETmo0rvdcaQGZuYGg==}
+  '@strada.sh/light@0.2.1':
+    resolution: {integrity: sha512-bVds48ky8eHtMRsLYsjGctv//6KRxq2Bdtky5zLbF/g6cODsExdm4IZZhW2+nA7xhSu+wwc6fDEtDQu8voUopg==}
 
   '@stylistic/eslint-plugin@5.7.1':
     resolution: {integrity: sha512-zjTUwIsEfT+k9BmXwq1QEFYsb4afBlsI1AXFyWQBgggMzwBFOuu92pGrE5OFx90IOjNl+lUbQoTG7f8S0PkOdg==}
@@ -10394,7 +10394,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@strada.sh/light@0.2.0': {}
+  '@strada.sh/light@0.2.1': {}
 
   '@stylistic/eslint-plugin@5.7.1(eslint@9.39.5(jiti@2.7.0))':
     dependencies:

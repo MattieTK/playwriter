@@ -2,7 +2,18 @@
  * Anonymous usage telemetry sent to Strada (https://strada.sh).
  *
  * Only the relay daemon emits events: every client (CLI, MCP, SDK) talks to
- * it, so it sees all usage in one place. Uses `@strada.sh/light`, which has
+ * it, so it sees all usage in one place. `initStrada()` runs only inside
+ * `startRelayTelemetry()`, called by the daemon entry. CLI, MCP, and SDK
+ * processes never connect to Strada, and `trackEvent()` is a no-op in any
+ * process that did not start telemetry (in-process relays, tests).
+ *
+ * Connections: events are batched and flushed every 10s, one POST per
+ * flush. Node's fetch keeps the socket alive ~4s after each POST, and
+ * `@strada.sh/light` reads every response so the socket can be reused.
+ * Holding it open longer would need an undici Agent; an idle TLS socket
+ * for a few events per minute is not worth it.
+ *
+ * Uses `@strada.sh/light`, which has
  * no dependencies and installs nothing global (no OTel providers, no process
  * handlers, no hostname or OS username).
  *
@@ -36,14 +47,7 @@ export const TELEMETRY_ENABLED = (() => {
   return optOut !== '0' && optOut !== 'false' && doNotTrack !== '1' && doNotTrack !== 'true'
 })()
 
-// Telemetry failures are returned as values and already warned once by the SDK.
-void initStrada({
-  projectId: STRADA_PROJECT_ID,
-  service: 'playwriter',
-  version: VERSION,
-  enabled: TELEMETRY_ENABLED,
-  telemetry: { logs: { scheduledDelayMillis: 2000 } },
-})
+const FLUSH_INTERVAL_MS = 10_000
 
 export type SessionKind = 'extension' | 'headless' | 'cdp' | 'cloud' | 'remote'
 
@@ -57,6 +61,7 @@ type TelemetryEvents = {
 }
 
 let anonymousId: string | undefined
+let relayTelemetryStarted = false
 
 function readOrCreateTelemetryId(): string {
   const existing = fs.existsSync(TELEMETRY_ID_PATH) ? fs.readFileSync(TELEMETRY_ID_PATH, 'utf-8').trim() : ''
@@ -85,8 +90,8 @@ function getAnonymousId(): string {
 }
 
 export function trackEvent<Name extends keyof TelemetryEvents>(name: Name, properties: TelemetryEvents[Name]): void {
-  // Checked here only so an opted-out user never gets a telemetry-id file on disk.
-  if (!TELEMETRY_ENABLED) {
+  // Also keeps opted-out users from getting a telemetry-id file on disk.
+  if (!relayTelemetryStarted) {
     return
   }
   void track(name, { ...properties, anon_id: getAnonymousId() })
@@ -106,14 +111,28 @@ function reportUsage(): void {
   pendingExecutes = 0
 }
 
-/** Called once by the relay daemon entry. */
+/** Called once by the relay daemon entry. The only place that initializes Strada. */
 export function startRelayTelemetry(): void {
+  if (relayTelemetryStarted || !TELEMETRY_ENABLED) {
+    return
+  }
+  // Failures are returned as values and already warned once by the SDK.
+  void initStrada({
+    projectId: STRADA_PROJECT_ID,
+    service: 'playwriter',
+    version: VERSION,
+    telemetry: { logs: { scheduledDelayMillis: FLUSH_INTERVAL_MS } },
+  })
+  relayTelemetryStarted = true
   trackEvent('relay_started', { os: process.platform, arch: process.arch, node: process.versions.node })
   setInterval(reportUsage, USAGE_REPORT_INTERVAL_MS).unref()
 }
 
 /** Report pending usage and send buffered events. Call before the relay exits. */
 export async function flushTelemetry(): Promise<void> {
+  if (!relayTelemetryStarted) {
+    return
+  }
   reportUsage()
   await Promise.race([
     flush(),
