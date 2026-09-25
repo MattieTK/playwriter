@@ -39,6 +39,10 @@
         box-sizing: border-box;
       }
 
+      html {
+        overflow-y: scroll;
+      }
+
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
         font-size: 16px;
@@ -123,6 +127,34 @@
         color: var(--color-heading);
       }
 
+      .hl {
+        color: var(--color-link);
+        font-weight: 600;
+      }
+
+      .hl-green {
+        color: var(--color-success);
+        font-weight: 600;
+      }
+
+      .c-gray {
+        color: var(--color-muted);
+      }
+      .c-green {
+        color: var(--color-success);
+      }
+      .c-orange {
+        color: #f59e0b;
+      }
+      .c-red {
+        color: #ef4444;
+      }
+
+      .lead {
+        font-size: 1.0625rem;
+        opacity: 1;
+      }
+
       .step-number {
         color: var(--color-link);
         font-weight: 700;
@@ -143,13 +175,65 @@
         min-width: 0;
       }
 
-      footer {
-        margin-top: 3rem;
-        padding-top: 2rem;
+      .copy-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding: 0.5rem 0.875rem;
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        background: var(--color-bg);
+        color: var(--color-heading);
+        font-size: 0.9375rem;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+      }
+
+      .copy-btn:hover {
+        border-color: var(--color-muted);
+      }
+
+      .copy-btn.copied {
+        color: var(--color-success);
+        border-color: var(--color-success);
+      }
+
+      .copy-btn svg {
+        width: 1rem;
+        height: 1rem;
+      }
+
+      details {
+        margin-top: 2rem;
         border-top: 1px solid var(--color-border);
-        text-align: center;
+        padding-top: 1rem;
+      }
+
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: var(--color-heading);
+        font-size: 1rem;
+        list-style: none;
+      }
+
+      summary::-webkit-details-marker {
+        display: none;
+      }
+
+      summary::before {
+        content: '▸';
+        display: inline-block;
+        margin-right: 0.5rem;
         color: var(--color-muted);
-        font-size: 0.875rem;
+        transition: transform 0.15s;
+      }
+
+      details[open] summary::before {
+        transform: rotate(90deg);
       }
 
       /* Tomorrow (light) token colors */
@@ -277,131 +361,166 @@
       <section>
         <h2>Getting Started with Playwriter</h2>
 
-        <p>Control your browser via Playwright API. Uses extension + CLI. No context bloat.</p>
+        <p class="lead">
+          Let your <span class="hl">coding agent</span> drive this browser. Open
+          <strong>Claude Code</strong>, <strong>opencode</strong>, or <strong>pi</strong> and paste this prompt:
+        </p>
 
-        <h3>Installation</h3>
+        <button type="button" class="copy-btn" id="copy-prompt">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span class="copy-btn-label">Copy agent prompt to install</span>
+        </button>
+        <p id="prompt-text" hidden>Install the Playwriter skill by running: npx -y skills add https://playwriter.dev
+Then read the skill (or run `npx playwriter skill`) to learn the API.
+Then use Playwriter to open a new tab and navigate to the GitHub project at https://github.com/remorses/playwriter.</p>
 
-        <div class="step">
-          <span class="step-number">1</span>
-          <div class="step-content">
-            <strong>Pin the extension</strong>
-            <p>Click the puzzle icon in Chrome's toolbar, then pin Playwriter so it's always visible.</p>
+        <p>It installs the skill, then drives your <span class="hl-green">existing Chrome</span>. No new browser, no context bloat.</p>
+      </section>
+
+      <details>
+        <summary>Manual setup &amp; full documentation</summary>
+
+        <section>
+          <h3>Installation</h3>
+
+          <div class="step">
+            <span class="step-number">1</span>
+            <div class="step-content">
+              <strong>Pin the extension</strong>
+              <p>Click the puzzle icon in Chrome's toolbar, then pin Playwriter so it's always visible.</p>
+            </div>
           </div>
-        </div>
 
-        <div class="step">
-          <span class="step-number">2</span>
-          <div class="step-content">
-            <strong>Enable a tab after the daemon starts</strong>
-            <p>
-              Click the extension icon on a tab. It turns green when connected. The icon stays gray until an agent runs
-              a playwriter command, which starts the local daemon.
-            </p>
+          <div class="step">
+            <span class="step-number">2</span>
+            <div class="step-content">
+              <strong>Enable a tab after the daemon starts</strong>
+              <p>
+                Click the extension icon on a tab. It turns green when connected. The icon stays gray until an agent
+                runs a playwriter command, which starts the local daemon.
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div class="step">
-          <span class="step-number">3</span>
-          <div class="step-content">
-            <strong>Install the CLI and run a command</strong>
-            <pre><code class="language-bash"># install the CLI globally
+          <div class="step">
+            <span class="step-number">3</span>
+            <div class="step-content">
+              <strong>Install the CLI and run a command</strong>
+              <pre><code class="language-bash"># install the CLI globally
 npm i -g playwriter
-# navigate to a URL in the active tab
-playwriter -s 1 -e "await page.goto('https://example.com')"</code></pre>
+# open a new tab and navigate to a URL
+playwriter -s 1 -e "state.page = await context.newPage(); await state.page.goto('https://example.com')"</code></pre>
+            </div>
           </div>
-        </div>
 
-        <div class="step">
-          <span class="step-number">4</span>
-          <div class="step-content">
-            <strong>Add the skill to your agent</strong>
-            <p>Install the Playwriter skill so your agent can call the CLI:</p>
-            <pre><code class="language-bash"># add playwriter skill to your coding agent
+          <div class="step">
+            <span class="step-number">4</span>
+            <div class="step-content">
+              <strong>Add the skill to your agent</strong>
+              <p>Install the Playwriter skill so your agent can call the CLI:</p>
+              <pre><code class="language-bash"># add playwriter skill to your coding agent
 npx -y skills add https://playwriter.dev</code></pre>
+            </div>
           </div>
-        </div>
 
-        <h3>CLI Examples</h3>
+          <h3>CLI Examples</h3>
 
-        <pre><code class="language-bash"># create a stateful sandbox, outputs session id (e.g. 1)
+          <pre><code class="language-bash"># create a stateful sandbox, outputs session id (e.g. 1)
 playwriter session new
-# navigate to a URL
-playwriter -s 1 -e "await page.goto('https://example.com')"
+# open a new tab and navigate to a URL
+playwriter -s 1 -e "state.page = await context.newPage(); await state.page.goto('https://example.com')"
 # get the accessibility tree of the page
-playwriter -s 1 -e "console.log(await snapshot({ page }))"
+playwriter -s 1 -e "console.log(await snapshot({ page: state.page }))"
 # click an element by its accessibility reference
-playwriter -s 1 -e "await page.locator('aria-ref=e5').click()"</code></pre>
-      </section>
+playwriter -s 1 -e "await state.page.locator('aria-ref=e5').click()"</code></pre>
+        </section>
 
-      <section>
-        <h2>How It Works</h2>
+        <section>
+          <h2>How It Works</h2>
 
-        <ul>
-          <li><strong>No new Chrome instances:</strong> Works with your current browser session</li>
-          <li><strong>No CDP mode required:</strong> No need to restart Chrome with special flags</li>
-          <li><strong>Full CDP access:</strong> Complete Chrome DevTools Protocol capabilities</li>
-          <li><strong>Visual feedback:</strong> Extension icon changes color to indicate connection status</li>
-        </ul>
-      </section>
+          <ul>
+            <li><strong>No new Chrome instances:</strong> Works with your current browser session</li>
+            <li><strong>No CDP mode required:</strong> No need to restart Chrome with special flags</li>
+            <li><strong>Full CDP access:</strong> Complete Chrome DevTools Protocol capabilities</li>
+            <li><strong>Visual feedback:</strong> Extension icon changes color to indicate connection status</li>
+          </ul>
+        </section>
 
-      <section>
-        <h2>Icon States</h2>
+        <section>
+          <h2>Icon States</h2>
 
-        <ul>
-          <li><strong>Gray:</strong> Not connected to any tab</li>
-          <li><strong>Green:</strong> Successfully connected and ready</li>
-          <li><strong>Orange badge (...):</strong> Connecting to relay server</li>
-          <li><strong>Red badge (!):</strong> Error occurred</li>
-        </ul>
-      </section>
+          <ul>
+            <li><strong class="c-gray">Gray:</strong> Not connected to any tab</li>
+            <li><strong class="c-green">Green:</strong> Successfully connected and ready</li>
+            <li><strong class="c-orange">Orange badge (...):</strong> Connecting to relay server</li>
+            <li><strong class="c-red">Red badge (!):</strong> Error occurred</li>
+          </ul>
+        </section>
 
-      <section>
-        <h2>Privacy &amp; Security</h2>
+        <section>
+          <h2>Privacy &amp; Security</h2>
 
-        <p>
-          Playwriter is local by default. Normal browser control stays between the extension and the relay on your
-          computer. Remote control is optional and starts only after you confirm a disclosure for one selected tab.
-        </p>
-        <p>
-          While Remote control is active, browser data passes through an encrypted Playwriter tunnel to anyone holding
-          the secret link. Read the <a href="https://playwriter.dev/privacy" target="_blank" rel="noopener noreferrer"
-            >privacy policy</a
-          > before sharing sensitive tabs.
-        </p>
-      </section>
+          <p>
+            Playwriter is local by default. Normal browser control stays between the extension and the relay on your
+            computer. Remote control is optional and starts only after you confirm a disclosure for one selected tab.
+          </p>
+          <p>
+            While Remote control is active, browser data passes through an encrypted Playwriter tunnel to anyone holding
+            the secret link. Read the <a href="https://playwriter.dev/privacy" target="_blank" rel="noopener noreferrer"
+              >privacy policy</a
+            > before sharing sensitive tabs.
+          </p>
+        </section>
 
-      <section>
-        <h2>MCP Setup (Optional)</h2>
+        <section>
+          <h2>MCP Setup (Optional)</h2>
 
-        <p>The CLI is the recommended way to use Playwriter. If you need MCP server setup, auto-configure it with:</p>
+          <p>The CLI is the recommended way to use Playwriter. If you need MCP server setup, auto-configure it with:</p>
 
-        <pre><code class="language-bash"># auto-configure MCP server for your editor
+          <pre><code class="language-bash"># auto-configure MCP server for your editor
 npx -y @playwriter/install-mcp playwriter@latest</code></pre>
 
-        <p>
-          For full MCP instructions, see
-          <a href="https://github.com/remorses/playwriter/blob/main/MCP.md" target="_blank" rel="noopener noreferrer"
-            >MCP.md</a
-          >.
-        </p>
-      </section>
+          <p>
+            For full MCP instructions, see
+            <a href="https://github.com/remorses/playwriter/blob/main/MCP.md" target="_blank" rel="noopener noreferrer"
+              >MCP.md</a
+            >.
+          </p>
+        </section>
 
-      <section>
-        <h2>Need Help?</h2>
+        <section>
+          <h2>Need Help?</h2>
 
-        <p>
-          For issues, feature requests, or contributions, visit the
-          <a href="https://github.com/remorses/playwriter" target="_blank" rel="noopener noreferrer">
-            GitHub repository
-          </a>
-          .
-        </p>
-      </section>
+          <p>
+            For issues, feature requests, or contributions, visit the
+            <a href="https://github.com/remorses/playwriter" target="_blank" rel="noopener noreferrer">
+              GitHub repository
+            </a>
+            .
+          </p>
+        </section>
+      </details>
 
-      <footer>
-        <p>Playwriter &copy; Microsoft Corporation &middot; Licensed under Apache-2.0</p>
-      </footer>
     </main>
+    <script type="module">
+      const btn = document.getElementById('copy-prompt')
+      const promptText = document.getElementById('prompt-text')
+      const original = btn.innerHTML
+      const checkIcon =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span class="copy-btn-label">Copied</span>'
+      btn.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(promptText.textContent.trim())
+        btn.classList.add('copied')
+        btn.innerHTML = checkIcon
+        setTimeout(() => {
+          btn.classList.remove('copied')
+          btn.innerHTML = original
+        }, 1500)
+      })
+    </script>
     <script src="prism.min.js"></script>
     <script src="prism-bash.min.js"></script>
   </body>

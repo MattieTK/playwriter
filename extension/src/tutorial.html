@@ -13,6 +13,7 @@
         --color-border: #d4d4d4;
         --color-link: #0969da;
         --color-link-hover: #0550ae;
+        --color-success: #16a34a;
         --max-width: 640px;
       }
 
@@ -24,6 +25,7 @@
           --color-border: #404040;
           --color-link: #4493f8;
           --color-link-hover: #539bf5;
+          --color-success: #22c55e;
         }
       }
 
@@ -97,6 +99,16 @@
         color: var(--color-heading);
       }
 
+      .hl-green {
+        color: var(--color-success);
+        font-weight: 600;
+      }
+
+      .lead {
+        font-size: 1.0625rem;
+        opacity: 1;
+      }
+
       code[class*='language-'],
       pre[class*='language-'] {
         color: #8959a8;
@@ -137,11 +149,11 @@
   </head>
   <body>
     <main>
-      <h2>The Playwriter daemon is not running</h2>
+      <h2>Daemon not running yet</h2>
 
-      <p>
-        You clicked the Playwriter icon. It cannot turn <strong>green</strong> until a
-        <code>playwriter</code> command runs on this machine. That first command starts the daemon.
+      <p class="lead">
+        The icon turns <span class="hl-green">green</span> once a <code>playwriter</code> command runs on this machine.
+        That first command starts the daemon.
       </p>
 
       <pre><code class="language-bash">npx -y skills add https://playwriter.dev
@@ -149,10 +161,7 @@
 npx playwriter session new
 npx playwriter -s 1 -e "context.newPage().then((p) => p.goto('https://example.com'))"</code></pre>
 
-      <p>
-        Or ask your agent to use the browser. After that, click the icon on a normal website tab to let your agents
-        control an existing tab.
-      </p>
+      <p>Or just ask your agent to use the browser. Then click the icon on any tab to control it.</p>
     </main>
     <script src="prism.min.js"></script>
     <script src="prism-bash.min.js"></script>
