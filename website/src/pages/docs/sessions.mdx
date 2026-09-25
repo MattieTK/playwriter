@@ -144,6 +144,27 @@ await page.goto('https://example.com')
 
 `tabGroupColor` is typed as Chrome's tab group colors: `grey`, `blue`, `red`, `yellow`, `green`, `pink`, `purple`, `cyan`, `orange`. `await using` calls `close()` at scope end: it closes leftover pages, disconnects CDP, and deletes the session. It needs Node 24+ (or a TypeScript 5.2+ / tsx build). Without `await using`, call `await connection.close()` in `finally`.
 
+### Choosing a browser
+
+If the extension runs in more than one browser or profile (Chrome, Brave, Ghost, a work profile), pass `selectBrowser`. It gets every connected browser and returns the one to use. Without it, connecting fails when more than one browser is connected.
+
+```ts
+import { connectViaExtension, listBrowsers } from 'playwriter'
+
+await using connection = await connectViaExtension({
+  selectBrowser: (browsers) => {
+    // [{ id, browser: 'Brave', email: 'me@work.com', activeTabs, playwriterVersion }]
+    return browsers.find((b) => b.browser === 'Brave' && b.email === 'me@work.com')
+  },
+})
+console.log(connection.extensionBrowser.id)
+
+// same list, without connecting
+const browsers = await listBrowsers()
+```
+
+`id` is stable across restarts, so you can save it and match on it later. `email` is `null` when the profile is not signed in.
+
 Do not POST `/cli/session/new` yourself. Do not call `chromium.connectOverCDP(getCdpUrl(...))` unless you already have a session from the CLI.
 
 ## Session management

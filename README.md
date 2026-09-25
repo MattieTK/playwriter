@@ -114,6 +114,19 @@ await page.goto('https://example.com')
 
 `tabGroupColor` is typed as Chrome's tab group colors. `await using` calls `close()` at scope end: it closes leftover pages, disconnects CDP, and deletes the session. Without `await using`, call `await connection.close()` in `finally`.
 
+If the extension runs in more than one browser or profile, pass `selectBrowser`. It gets every connected browser and returns the one to use:
+
+```ts
+await using connection = await connectViaExtension({
+  selectBrowser: (browsers) => {
+    // [{ id, browser: 'Brave', email: 'me@work.com', activeTabs, playwriterVersion }]
+    return browsers.find((b) => b.email === 'me@work.com')
+  },
+})
+```
+
+`id` is stable, so you can save it and match on it later. `listBrowsers()` returns the same list without connecting.
+
 Multiline:
 
 ```bash

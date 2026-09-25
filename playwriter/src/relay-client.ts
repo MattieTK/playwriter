@@ -363,25 +363,81 @@ export type CreatedRelaySession = {
 
 export type PlaywriterBrowserConnection = {
   browser: Browser
+  /** The browser profile this connection controls. */
+  extensionBrowser: ExtensionBrowser
   sessionId: string
   close(): Promise<void>
   /** Enables `await using connection = await connectViaExtension()`. Same as close(). */
   [Symbol.asyncDispose](): Promise<void>
 }
 
+/** A browser profile with the Playwriter extension connected to the local relay. */
+export type ExtensionBrowser = {
+  /** Stable across extension reconnects and relay restarts. Safe to persist. */
+  id: string
+  /** Browser brand detected by the extension: Chrome, Brave, Edge, Ghost, ... */
+  browser: string
+  /** Email of the Chrome profile signed-in account, or null if not signed in. */
+  email: string | null
+  /** Tabs the extension has currently attached to Playwriter. */
+  activeTabs: number
+  playwriterVersion: string | null
+}
+
+export type SelectBrowser = (
+  browsers: ExtensionBrowser[],
+) => ExtensionBrowser | undefined | Promise<ExtensionBrowser | undefined>
+
+function toExtensionBrowser(extension: ExtensionStatus): ExtensionBrowser {
+  return {
+    id: extension.stableKey || extension.extensionId,
+    browser: extension.browser || 'Chrome',
+    email: extension.profile?.email || null,
+    activeTabs: extension.activeTargets,
+    playwriterVersion: extension.playwriterVersion,
+  }
+}
+
+function formatBrowserList(browsers: ExtensionBrowser[]): string {
+  return browsers
+    .map((browser) => {
+      return `- ${browser.browser} ${browser.email || '(not signed in)'} id=${browser.id}`
+    })
+    .join('\n')
+}
+
+/**
+ * List browsers with the Playwriter extension connected. Starts the relay if needed
+ * and waits briefly for at least one extension. Returns [] if none connects.
+ */
+export async function listBrowsers({
+  port = RELAY_PORT,
+  logger,
+}: {
+  port?: number
+  logger?: { log: (...args: any[]) => void }
+} = {}): Promise<ExtensionBrowser[]> {
+  await ensureRelayServer({ logger })
+  const extensions = await waitForConnectedExtensions({ port, logger })
+  return extensions.map(toExtensionBrowser)
+}
+
 export async function createRelaySession({
   port = RELAY_PORT,
+  browserId,
   tabGroup,
   tabGroupColor,
 }: {
   port?: number
+  /** ExtensionBrowser.id. Required when more than one browser is connected. */
+  browserId?: string
   tabGroup?: string
   tabGroupColor?: TabGroupColor
 } = {}): Promise<CreatedRelaySession> {
   const response = await fetch(`http://127.0.0.1:${port}/cli/session/new`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tabGroup, tabGroupColor, client: 'sdk' }),
+    body: JSON.stringify({ extensionId: browserId, tabGroup, tabGroupColor, client: 'sdk' }),
   })
   const result = (await response.json()) as CreatedRelaySession & { error?: string }
   if (!response.ok) {
@@ -416,27 +472,51 @@ export async function deleteRelaySession({
 
 export async function connectViaExtension({
   port = RELAY_PORT,
+  selectBrowser,
   tabGroup,
   tabGroupColor,
   logger,
 }: {
   port?: number
+  /**
+   * Pick which browser to use when the extension runs in more than one browser
+   * or profile. Return one item of the array. Called even with a single browser.
+   * Without it, connecting fails if more than one browser is connected.
+   */
+  selectBrowser?: SelectBrowser
   tabGroup?: string
   tabGroupColor?: TabGroupColor
   logger?: { log: (...args: any[]) => void }
 } = {}): Promise<PlaywriterBrowserConnection> {
-  await ensureRelayServer({ logger })
-  const extensions = await waitForConnectedExtensions({ port, logger })
-  if (extensions.length === 0) {
+  const browsers = await listBrowsers({ port, logger })
+  if (browsers.length === 0) {
     throw new Error(EXTENSION_NOT_CONNECTED_ERROR)
   }
 
-  const session = await createRelaySession({ port, tabGroup, tabGroupColor })
+  const selected = await (async (): Promise<ExtensionBrowser> => {
+    if (selectBrowser) {
+      const choice = await selectBrowser(browsers)
+      const match = choice && browsers.find((browser) => browser.id === choice.id)
+      if (!match) {
+        throw new Error(`selectBrowser returned no connected browser. Connected:\n${formatBrowserList(browsers)}`)
+      }
+      return match
+    }
+    if (browsers.length > 1) {
+      throw new Error(
+        `Playwriter is connected in ${browsers.length} browsers. Pass selectBrowser to connectViaExtension() to pick one:\n${formatBrowserList(browsers)}`,
+      )
+    }
+    return browsers[0]
+  })()
+
+  const session = await createRelaySession({ port, browserId: selected.id, tabGroup, tabGroupColor })
   const chromium = await getChromium()
   const browser = await chromium
     .connectOverCDP(
       getCdpUrl({
         port,
+        extensionId: selected.id,
         sessionId: session.id,
         tabGroup,
         tabGroupColor,
@@ -464,6 +544,7 @@ export async function connectViaExtension({
 
   return {
     browser,
+    extensionBrowser: selected,
     sessionId: session.id,
     close,
     [Symbol.asyncDispose]: close,

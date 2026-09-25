@@ -6,9 +6,15 @@ export {
   deleteRelaySession,
   ensureRelayServer,
   EXTENSION_NOT_CONNECTED_ERROR,
+  listBrowsers,
   PLAYWRITER_EXTENSION_URL,
 } from './relay-client.js'
-export type { CreatedRelaySession, PlaywriterBrowserConnection } from './relay-client.js'
+export type {
+  CreatedRelaySession,
+  ExtensionBrowser,
+  PlaywriterBrowserConnection,
+  SelectBrowser,
+} from './relay-client.js'
 export type { Browser, BrowserContext, Page } from './playwright-import.js'
 export type { TabGroupColor } from './protocol.js'
 export { getCDPSessionForPage, PlaywrightCDPSessionAdapter } from './cdp-session.js'

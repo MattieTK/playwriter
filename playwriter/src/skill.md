@@ -68,6 +68,8 @@ const page = await connection.browser.contexts()[0].newPage()
 await page.goto('https://example.com')
 ```
 
+With several browsers or profiles connected, pass `selectBrowser: (browsers) => browsers.find((b) => b.email === 'me@work.com')`. Each item has `id` (stable), `browser` (Chrome, Brave, Ghost...), `email`.
+
 ### Remote access (control browser from another machine)
 
 Playwriter can control a Chrome browser running on a different machine over the internet. The host machine runs `playwriter serve` with a [traforo](https://traforo.dev) tunnel, and the remote machine connects through the tunnel URL.
