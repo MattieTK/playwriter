@@ -48,6 +48,8 @@ playwriter session reset <sessionId>
 
 Use the shortest clear **single-word** group name with no spaces, such as `docs`, `shop`, `test`, or `scrape`. Local sessions default to `playwriter`; remote-control sessions default to `remote`.
 
+If you use playwriter on your own initiative (the user did not ask for browser work), for example to verify a local dev server, set a task-specific group: the short project name, like `--tab-group kimaki`.
+
 ```bash
 playwriter session new --tab-group docs
 playwriter session new --tab-group scrape --tab-group-color grey
