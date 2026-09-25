@@ -367,7 +367,7 @@ export async function createRelaySession({
   const response = await fetch(`http://127.0.0.1:${port}/cli/session/new`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tabGroup, tabGroupColor }),
+    body: JSON.stringify({ tabGroup, tabGroupColor, client: 'sdk' }),
   })
   const result = (await response.json()) as CreatedRelaySession & { error?: string }
   if (!response.ok) {

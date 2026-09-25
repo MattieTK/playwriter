@@ -11,6 +11,7 @@ export default defineConfig({
 
     env: {
       PLAYWRITER_NODE_ENV: 'development',
+      PLAYWRITER_TELEMETRY: '0',
     },
   },
 })

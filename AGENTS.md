@@ -87,6 +87,10 @@ after EVERY change made inside extension/ folder you MUST bump the manifest.json
 
 Do not manually edit CHANGELOG.md files for extension changes. Always add a `playwriter` changeset for user-facing extension changes. Never skip a changeset because the files live in `extension/`.
 
+## telemetry
+
+anonymous usage events live in `playwriter/src/telemetry.ts` and use `@strada.sh/light`. add new events to the `TelemetryEvents` type and call `trackEvent()`, never `track()` directly. only the relay emits events. never send code, URLs, page content, emails, hostnames, or paths. error reporting is off on purpose.
+
 ## toolbar copy
 
 keep toolbar tooltips and action toasts very short. a few words the user can read at a glance. `Copied prompt`, not a sentence that explains the feature.

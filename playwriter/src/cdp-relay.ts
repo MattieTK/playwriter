@@ -48,6 +48,7 @@ import * as relayState from './relay-state.js'
 import { WebSocket as NodeWebSocket } from 'ws'
 import { getRemoteDialRetryMs, parseRemoteControlUrl, type RemoteHelloMessage } from './remote-control.js'
 import type { CloudAuth } from './cloud-client.js'
+import { recordExecute, trackEvent, type SessionKind } from './telemetry.js'
 
 /**
  * Checks if a target should be filtered out (not exposed to Playwright).
@@ -1175,6 +1176,7 @@ export async function startPlayWriterCDPRelayServer({
       const clientSessionId = url.searchParams.get('session') || undefined
       const clientTabGroup = normalizeTabGroupTitle(url.searchParams.get('tabGroup')) || undefined
       const clientTabGroupColor = normalizeTabGroupColor(url.searchParams.get('tabGroupColor')) || undefined
+      const clientKind = url.searchParams.get('client')
       // When extensionId is explicit, resolve directly. Otherwise use fallback which
       // handles single-extension and uniquely-active-extension cases (#52).
       const resolvedExtension = requestedExtensionId
@@ -1222,6 +1224,9 @@ export async function startPlayWriterCDPRelayServer({
               `Playwright client connected: ${clientId} (${store.getState().playwrightClients.size} total) (extension? ${!!extensionConnection}) (${targetCount} pages)`,
             ),
           )
+          if (clientKind === 'mcp') {
+            trackEvent('mcp_connected', {})
+          }
         },
 
         async onMessage(event, ws) {
@@ -1552,6 +1557,10 @@ export async function startPlayWriterCDPRelayServer({
 
           startExtensionPing(connectionId)
           logger?.log(`Extension connected (${connectionId})`)
+          trackEvent('extension_connected', {
+            browser: initialInfo.browser || 'unknown',
+            extension_version: initialInfo.version || 'unknown',
+          })
         },
 
         async onMessage(data, ws) {
@@ -2242,6 +2251,31 @@ export async function startPlayWriterCDPRelayServer({
   app.use('/stream/*', privilegedRouteMiddleware)
   app.use('/mcp-log', privilegedRouteMiddleware)
 
+  // Track only sessions that were actually created. Hono caches the parsed
+  // body, so the route handler below can read c.req.json() again.
+  app.use('/cli/session/new', async (c, next) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      client?: string
+      headless?: boolean
+      cloud?: object
+      cdpEndpoint?: string
+      remoteControlUrl?: string
+    }
+    await next()
+    if (!c.res.ok) {
+      return
+    }
+    const kind: SessionKind = (() => {
+      if (body.headless) return 'headless'
+      if (body.cloud) return 'cloud'
+      if (body.cdpEndpoint) return 'cdp'
+      if (body.remoteControlUrl) return 'remote'
+      return 'extension'
+    })()
+    // Only the SDK's createRelaySession() sends client; every CLI path omits it.
+    trackEvent('session_created', { client: body.client === 'sdk' ? 'sdk' : 'cli', kind })
+  })
+
   app.post('/mcp-log', async (c) => {
     try {
       const body = await c.req.json()
@@ -2276,6 +2310,7 @@ export async function startPlayWriterCDPRelayServer({
           404,
         )
       }
+      recordExecute()
       // Touch cloud session activity tracking if this session is cloud-backed
       const cloudTracking = cloudSessionTracking.get(sessionId)
       if (cloudTracking) {

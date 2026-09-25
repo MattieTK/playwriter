@@ -1,6 +1,7 @@
 import { startPlayWriterCDPRelayServer } from './cdp-relay.js'
 import { createFileLogger } from './create-logger.js'
 import { waitForRelayVersion } from './relay-client.js'
+import { flushTelemetry, startRelayTelemetry } from './telemetry.js'
 import { LOG_CDP_FILE_PATH } from './utils.js'
 
 process.title = 'playwriter-ws-server'
@@ -52,17 +53,16 @@ export async function startServer({
   console.log('Logs are being written to:', logger.logFilePath)
   console.log('CDP logs are being written to:', LOG_CDP_FILE_PATH)
 
-  process.on('SIGINT', () => {
-    console.log('\nShutting down...')
-    server.close()
-    process.exit(0)
-  })
+  startRelayTelemetry()
 
-  process.on('SIGTERM', () => {
+  const shutdown = async () => {
     console.log('\nShutting down...')
     server.close()
+    await flushTelemetry()
     process.exit(0)
-  })
+  }
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 
   return server
 }

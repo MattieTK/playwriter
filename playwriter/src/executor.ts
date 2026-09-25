@@ -383,6 +383,8 @@ export interface CdpConfig {
   tabGroup?: string
   /** Explicit tab group color (extension and remote-control modes) */
   tabGroupColor?: TabGroupColor
+  /** Sent as ?client= on the /cdp URL for anonymous usage stats */
+  client?: 'mcp'
 }
 
 export interface SessionMetadata {

@@ -38,7 +38,7 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: 1.0.0-beta.22
-        version: 1.0.0-beta.22(@opentelemetry/api@1.9.1)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.6.4)
+        version: 1.0.0-beta.22(@opentelemetry/api@1.9.1)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.6.5)
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
@@ -345,6 +345,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)
+      '@strada.sh/light':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@xmorse/playwright-core':
         specifier: workspace:^
         version: link:../playwright/packages/playwright-core
@@ -3265,6 +3268,9 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
+  '@strada.sh/light@0.2.0':
+    resolution: {integrity: sha512-IsfZYiLjlt2AJGLo3QCu/4qQJsVwOG+ELKkMYnAWZBa4V4JxhG5qBaLOCmhV/CCbjYZzXETmo0rvdcaQGZuYGg==}
+
   '@stylistic/eslint-plugin@5.7.1':
     resolution: {integrity: sha512-zjTUwIsEfT+k9BmXwq1QEFYsb4afBlsI1AXFyWQBgggMzwBFOuu92pGrE5OFx90IOjNl+lUbQoTG7f8S0PkOdg==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
@@ -3534,9 +3540,6 @@ packages:
 
   '@types/node@25.9.5':
     resolution: {integrity: sha512-OScDchr2fwuUmWdf4kZ9h7PcJiYDVInhJizG/biAq3cAvqwYktuy/TYGGdZNMtNTFUP7rnb0NU4TUdm82kt4Rg==}
-
-  '@types/node@25.9.6':
-    resolution: {integrity: sha512-JR6Q/PV5DKFvjrGFVqQJdeG0qvsqQQLDa3TzFrqVwhqRXqwNaxPo2KYCtCQXpOdIulCouKwT7a6in9nFthBAzw==}
 
   '@types/node@26.4.0':
     resolution: {integrity: sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ==}
@@ -7769,8 +7772,8 @@ packages:
   zod@4.5.4:
     resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
-  zod@4.6.4:
-    resolution: {integrity: sha512-AXSD6hvGdvRjajG/l1cC+d6IrhH+sjmPKtYeQdJIK8MFJl3LyClzS+o/YsVC+zQZPupAaeH5skwwm8YqYH7BqA==}
+  zod@4.6.5:
+    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
   zustand@5.0.15:
     resolution: {integrity: sha512-MpSEjRiBkA9crSYeOUH32rJC7SVqAbm0Fqcqge/bUi2PPoLcBWKOsG+C8mevmpr8TwXHBVkChbbJiyvkE+i/3A==}
@@ -8687,11 +8690,11 @@ snapshots:
       remark-frontmatter: 5.0.0
       remark-gfm: 4.0.1
       remark-mdx: 3.1.1
-      spiceflow: 1.26.0-rsc.5(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))(@types/react@19.2.7)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.2.2(@types/node@25.9.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.20.6)(yaml@2.9.1))(zod@4.6.4)
+      spiceflow: 1.26.0-rsc.5(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))(@types/react@19.2.7)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.2.2(@types/node@25.9.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.20.6)(yaml@2.9.1))(zod@4.6.5)
       string-dedent: 3.0.2
       unist-util-visit: 5.1.0
       yaml: 2.9.1
-      zod: 4.6.4
+      zod: 4.6.5
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
       - '@types/react'
@@ -10391,6 +10394,8 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@strada.sh/light@0.2.0': {}
+
   '@stylistic/eslint-plugin@5.7.1(eslint@9.39.5(jiti@2.7.0))':
     dependencies:
       '@eslint-community/eslint-utils': 4.10.1(eslint@9.39.5(jiti@2.7.0))
@@ -10654,7 +10659,7 @@ snapshots:
 
   '@types/mssql@9.1.11':
     dependencies:
-      '@types/node': 25.9.6
+      '@types/node': 24.13.3
       tarn: 3.1.2
       tedious: 20.0.0
     transitivePeerDependencies:
@@ -10670,11 +10675,6 @@ snapshots:
   '@types/node@25.9.5':
     dependencies:
       undici-types: 7.24.6
-
-  '@types/node@25.9.6':
-    dependencies:
-      undici-types: 7.24.6
-    optional: true
 
   '@types/node@26.4.0':
     dependencies:
@@ -10696,7 +10696,7 @@ snapshots:
 
   '@types/readable-stream@4.0.24':
     dependencies:
-      '@types/node': 25.9.6
+      '@types/node': 24.13.3
     optional: true
 
   '@types/tern@0.23.9':
@@ -11818,12 +11818,12 @@ snapshots:
       mssql: 11.0.1
       zod: 4.5.4
 
-  drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.1)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.6.4):
+  drizzle-orm@1.0.0-beta.22(@opentelemetry/api@1.9.1)(@types/mssql@9.1.11)(mssql@11.0.1)(zod@4.6.5):
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
       '@types/mssql': 9.1.11
       mssql: 11.0.1
-      zod: 4.6.4
+      zod: 4.6.5
 
   dunder-proto@1.0.1:
     dependencies:
@@ -14912,13 +14912,13 @@ snapshots:
       - react-server-dom-webpack
       - vite
 
-  spiceflow@1.26.0-rsc.5(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))(@types/react@19.2.7)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.2.2(@types/node@25.9.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.20.6)(yaml@2.9.1))(zod@4.6.4):
+  spiceflow@1.26.0-rsc.5(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4))(@types/react@19.2.7)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.2.2(@types/node@25.9.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.20.6)(yaml@2.9.1))(zod@4.6.5):
     dependencies:
       '@vitejs/plugin-rsc': 0.5.27(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vite@8.2.2(@types/node@25.9.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.20.6)(yaml@2.9.1))
       eventsource-parser: 3.1.1
       its-fine: 2.0.0(@types/react@19.2.7)(react@19.2.7)
       nf3: 0.3.16
-      zod: 4.6.4
+      zod: 4.6.5
     optionalDependencies:
       '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.5.4)
       react: 19.2.7
@@ -15084,7 +15084,7 @@ snapshots:
       '@azure/identity': 4.13.2
       '@azure/keyvault-keys': 4.10.2
       '@js-joda/core': 5.7.0
-      '@types/node': 25.9.6
+      '@types/node': 24.13.3
       bl: 6.1.6
       iconv-lite: 0.6.3
       js-md4: 0.3.2
@@ -15100,7 +15100,7 @@ snapshots:
       '@azure/identity': 4.13.2
       '@azure/keyvault-keys': 4.10.2
       '@js-joda/core': 6.1.0
-      '@types/node': 25.9.6
+      '@types/node': 24.13.3
       bl: 6.1.6
       iconv-lite: 0.7.3
       js-md4: 0.3.2
@@ -15737,7 +15737,7 @@ snapshots:
 
   zod@4.5.4: {}
 
-  zod@4.6.4: {}
+  zod@4.6.5: {}
 
   zustand@5.0.15(@types/react@19.2.7)(react@19.2.7):
     optionalDependencies:

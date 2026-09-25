@@ -155,7 +155,7 @@ async function getOrCreateExecutor(): Promise<PlaywrightExecutor> {
     }
 
     // Pass config instead of pre-generated URL so executor can generate unique URLs for each connection
-    const cdpConfig = remote || { port: RELAY_PORT }
+    const cdpConfig = { ...(remote || { port: RELAY_PORT }), client: 'mcp' as const }
     return new PlaywrightExecutor({
       cdpConfig,
       logger: mcpLogger,

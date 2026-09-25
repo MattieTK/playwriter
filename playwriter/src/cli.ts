@@ -29,6 +29,7 @@ import {
 } from './relay-client.js'
 import { discoverChromeInstances, resolveDirectInput, type DiscoveredInstance } from './chrome-discovery.js'
 import { getCloudClient, loadCloudAuth, saveCloudAuth, CloudClient, buildLiveUrl, type CloudAuth } from './cloud-client.js'
+import { printTelemetryNoticeOnce } from './telemetry.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const executeDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
@@ -2281,4 +2282,5 @@ cli.on('command:*', () => {
   process.stderr.write('Run "playwriter --help" for usage information.\n')
 })
 
+printTelemetryNoticeOnce()
 await cli.parse()

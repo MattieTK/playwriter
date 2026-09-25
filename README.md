@@ -339,6 +339,17 @@ Also works on a LAN without traforo (`PLAYWRITER_HOST=192.168.1.10`). Full guide
 - **Visible automation**: Chrome shows automation banner on controlled tabs
 - **No remote access**: Malicious websites cannot connect
 
+## Telemetry
+
+The local relay sends **anonymous usage stats** to [Strada](https://strada.sh): event names, a random install id, Playwriter version, OS, session kind, and hourly execute counts. It never sends code, URLs, page content, emails, or hostnames.
+
+Opt out with an env var, then restart the relay:
+
+```bash
+export PLAYWRITER_TELEMETRY=0   # or DO_NOT_TRACK=1
+playwriter serve restart
+```
+
 ## Playwright API
 
 Connect programmatically (without CLI):

@@ -57,6 +57,20 @@ These values distinguish browser profiles and extension installations connected
 to the same **local relay**. They are sent to the relay on your own computer.
 They are not included in the Remote control handshake.
 
+## Anonymous usage stats
+
+The **local relay** (the Playwriter CLI and MCP process, not the extension)
+sends anonymous usage events to Strada, our analytics provider. Each event has
+the event name, a random installation ID stored in `~/.playwriter/telemetry-id`,
+the Playwriter version, OS, CPU architecture, Node.js version, session type,
+hourly command counts, and the extension version and browser name.
+
+These events **never include** code, URLs, page content, screenshots, emails,
+account IDs, hostnames, or file paths. The Chrome profile email is never sent.
+
+Set `PLAYWRITER_TELEMETRY=0` or `DO_NOT_TRACK=1` and restart the relay with
+`playwriter serve restart` to turn this off.
+
 ## Remote control
 
 Remote control is **off by default**. It starts only after you click the Remote
@@ -132,7 +146,7 @@ tab data to that recipient.
 The extension does not use browser data for:
 
 - **Advertising** or ad targeting
-- **Analytics**, telemetry, or cross-site tracking
+- **Analytics**, telemetry, or cross-site tracking. The anonymous usage stats above contain no browser data
 - **User profiling** or credit decisions
 - **Sale** to data brokers or other third parties
 
