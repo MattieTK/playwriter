@@ -19,7 +19,7 @@ import { getCdpUrl, parseRelayHost, sleep } from './utils.js'
 import type { TabGroupColor } from './protocol.js'
 import { isRemoteExtensionKey } from './relay-state.js'
 import { REMOTE_EXTENSION_NOT_CONNECTED_ERROR } from './remote-control.js'
-import { getExtensionOutdatedWarning } from './relay-client.js'
+import { EXTENSION_NOT_CONNECTED_ERROR, getExtensionOutdatedWarning } from './relay-client.js'
 import { waitForPageLoad, WaitForPageLoadOptions, WaitForPageLoadResult } from './wait-for-page-load.js'
 import { ICDPSession, getCDPSessionForPage } from './cdp-session.js'
 import { Debugger } from './debugger.js'
@@ -256,11 +256,6 @@ export function wrapCode(code: string): string {
   }
   return `(async () => { ${code} })()`
 }
-
-const EXTENSION_NOT_CONNECTED_ERROR = `The Playwriter Chrome extension is not connected. Make sure you have:
-1. Installed the extension: https://chromewebstore.google.com/detail/playwriter/jfeammnjpkecdekppnclgkkffahnhfhe
-2. Clicked the extension icon on a tab to enable it (or refreshed the page if just installed)
-3. Or use a cloud browser instead: run \`playwriter cloud login\` in your terminal to rent a browser in the cloud, with auto CAPTCHA solving, residential proxies and anti-detection built in`
 
 const CLOUD_SESSION_EXPIRED_ERROR =
   'Cloud browser session expired or was destroyed. Create a new session with: playwriter session new --browser cloud'

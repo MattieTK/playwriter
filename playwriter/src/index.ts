@@ -1,6 +1,13 @@
 export * from './cdp-relay.js'
 export * from './utils.js'
-export { connectViaExtension, createRelaySession, deleteRelaySession, ensureRelayServer } from './relay-client.js'
+export {
+  connectViaExtension,
+  createRelaySession,
+  deleteRelaySession,
+  ensureRelayServer,
+  EXTENSION_NOT_CONNECTED_ERROR,
+  PLAYWRITER_EXTENSION_URL,
+} from './relay-client.js'
 export type { CreatedRelaySession, PlaywriterBrowserConnection } from './relay-client.js'
 export type { Browser, BrowserContext, Page } from './playwright-import.js'
 export type { TabGroupColor } from './protocol.js'

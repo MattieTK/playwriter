@@ -88,6 +88,7 @@ describe('playwriter cli help', () => {
         code: 1,
         stderr: expect.stringContaining('ERROR code=extension_not_connected'),
       })
+      expect((error as { stderr: string }).stderr).toContain('chromewebstore.google.com/detail/playwriter')
     } finally {
       server.close()
     }

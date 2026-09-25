@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pc from 'picocolors'
+import dedent from 'string-dedent'
 import { getListeningPidsForPort, killPortProcess } from './kill-port.js'
 import { VERSION, getCdpUrl, sleep, LOG_FILE_PATH } from './utils.js'
 import { isRemoteExtensionKey } from './relay-state.js'
@@ -17,6 +18,19 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 export const RELAY_PORT = Number(process.env.PLAYWRITER_PORT) || 19988
+
+export const PLAYWRITER_EXTENSION_URL =
+  'https://chromewebstore.google.com/detail/playwriter/jfeammnjpkecdekppnclgkkffahnhfhe'
+
+// One message for CLI, executor and library users (skills calling
+// connectViaExtension). Written for the agent to relay to the user.
+export const EXTENSION_NOT_CONNECTED_ERROR = dedent`
+  The Playwriter Chrome extension is not connected.
+  Tell the user to:
+  1. Install the Playwriter extension in Chrome: ${PLAYWRITER_EXTENSION_URL}
+  2. Keep Chrome open. If the extension icon is gray, click it on any tab.
+  3. Run the command again.
+`
 
 export type ExtensionStatus = {
   extensionId: string
@@ -414,7 +428,7 @@ export async function connectViaExtension({
   await ensureRelayServer({ logger })
   const extensions = await waitForConnectedExtensions({ port, logger })
   if (extensions.length === 0) {
-    throw new Error('Playwriter is not connected. Enable the Playwriter extension in Chrome and try again.')
+    throw new Error(EXTENSION_NOT_CONNECTED_ERROR)
   }
 
   const session = await createRelaySession({ port, tabGroup, tabGroupColor })
