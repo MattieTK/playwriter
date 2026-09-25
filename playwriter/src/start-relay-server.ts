@@ -66,4 +66,4 @@ export async function startServer({
 
   return server
 }
-startServer().catch(logger.error)
+startServer({ token: process.env.PLAYWRITER_TOKEN }).catch(logger.error)
