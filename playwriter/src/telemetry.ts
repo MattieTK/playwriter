@@ -9,13 +9,13 @@
  *
  * Connections: events are batched and flushed every 10s, one POST per
  * flush. Node's fetch keeps the socket alive ~4s after each POST, and
- * `@strada.sh/light` reads every response so the socket can be reused.
+ * `@strada.sh/sdk` reads every response so the socket can be reused.
  * Holding it open longer would need an undici Agent; an idle TLS socket
  * for a few events per minute is not worth it.
  *
- * Uses `@strada.sh/light`, which has
- * no dependencies and installs nothing global (no OTel providers, no process
- * handlers, no hostname or OS username).
+ * Uses `@strada.sh/sdk`, which has no dependencies and sends no hostname or
+ * OS username. `captureUncaughtErrors: false` keeps its process handlers out
+ * of the relay: error reporting is off on purpose.
  *
  * Sent: event name, a random install id (~/.playwriter/telemetry-id),
  * playwriter version, OS, arch, Node version, session kind, client kind,
@@ -33,7 +33,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { flush, initStrada, track } from '@strada.sh/light'
+import { flush, initStrada, track } from '@strada.sh/sdk'
 import dedent from 'string-dedent'
 import { VERSION } from './utils.js'
 
@@ -121,6 +121,7 @@ export function startRelayTelemetry(): void {
     projectId: STRADA_PROJECT_ID,
     service: 'playwriter',
     version: VERSION,
+    captureUncaughtErrors: false,
     telemetry: { logs: { scheduledDelayMillis: FLUSH_INTERVAL_MS } },
   })
   relayTelemetryStarted = true
