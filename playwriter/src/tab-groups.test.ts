@@ -380,6 +380,14 @@ describe('Session tab groups', () => {
     const before = await waitForGroups((g) => g.some((group) => group.title === 'agent-shared' && group.tabCount === 4))
     expect(before.find((g) => g.title === 'agent-shared')?.tabCount).toBe(4)
 
+    // a close from an older relay start (same id, other ownership key) is refused
+    const staleResponse = await fetch(`${SERVER_URL}/cli/session/delete`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId: first, closeCreatedTabs: true, ownershipKey: `old-relay:${first}` }),
+    })
+    expect(staleResponse.status).toBe(409)
+
     const deleteResponse = await fetch(`${SERVER_URL}/cli/session/delete`, {
       method: 'POST',
       headers: JSON_HEADERS,

@@ -364,6 +364,10 @@ export function getRemoteExtensionMethodRejection(method: string): string | null
   if (method === 'startRecording' || method === 'stopRecording' || method === 'cancelRecording') {
     return 'Screen recording is not supported on shared remote-control tabs yet.'
   }
+  // Remote peers must never close tabs by ownership key: the handler scans every local tab
+  if (method === 'closeTabsForKey') {
+    return 'Closing session tabs is not available over Remote control.'
+  }
   if (method === 'ghost-browser') {
     return 'Ghost Browser APIs are not available on shared remote-control tabs.'
   }

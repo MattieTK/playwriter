@@ -357,6 +357,8 @@ async function ensureRelayServerImpl(options: EnsureRelayServerOptions = {}): Pr
 
 export type CreatedRelaySession = {
   id: string
+  /** Opaque tab ownership key. Missing on relays older than this SDK */
+  ownershipKey?: string
   tabGroup?: string | null
   tabGroupColor?: TabGroupColor | null
 }
@@ -453,16 +455,19 @@ export async function deleteRelaySession({
   port = RELAY_PORT,
   sessionId,
   closeCreatedTabs = false,
+  ownershipKey,
 }: {
   port?: number
   sessionId: string
+  /** From createRelaySession. The relay refuses the delete when it does not match (relay restarted, id reused) */
+  ownershipKey?: string
   /** Also close the tabs this session created (and popups they opened). Other sessions' tabs stay open. */
   closeCreatedTabs?: boolean
 }): Promise<{ warning?: string }> {
   const response = await fetch(`http://127.0.0.1:${port}/cli/session/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, closeCreatedTabs }),
+    body: JSON.stringify({ sessionId, closeCreatedTabs, ownershipKey }),
   })
   if (response.status === 404) {
     return {}
@@ -538,10 +543,16 @@ export async function connectViaExtension({
   const close = () => {
     closing ??= (async () => {
       await browser.close().catch(() => undefined)
-      const { warning } = await deleteRelaySession({ port, sessionId: session.id, closeCreatedTabs: true })
-      if (warning) {
-        // default sink so SDK users without a logger still learn their extension is too old
-        ;(logger?.log ?? console.warn)(warning)
+      const { warning } = await deleteRelaySession({
+        port,
+        sessionId: session.id,
+        closeCreatedTabs: true,
+        ownershipKey: session.ownershipKey,
+      })
+      if (warning && logger) {
+        logger.log(warning)
+      } else if (warning) {
+        console.warn(warning)
       }
     })()
     return closing

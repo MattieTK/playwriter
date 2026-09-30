@@ -225,7 +225,7 @@ type ForwardCDPCommand = {
       /** Tab group title for Target.createTarget — which group the new tab joins.
        *  Old extensions ignore this field (tab lands in the default group). */
       tabGroup?: string
-      /** Owning CLI session id for Target.createTarget. Group titles are not
+      /** Opaque session ownership key for Target.createTarget. Group titles are not
        *  identities — the key scopes `updateTabGroup` renames to the session's
        *  own tabs (a default-group rename must not steal manually toggled tabs). */
       tabGroupKey?: string
@@ -398,7 +398,7 @@ export type UpdateTabGroupMessage = {
     from: string
     /** New title. Equal to `from` when only the color changes. */
     to: string
-    /** Owning CLI session id. Required to move default-group tabs: only tabs
+    /** Opaque session ownership key. Required to move default-group tabs: only tabs
      *  created by this session follow the rename out of the shared default group. */
     key?: string
     /** New explicit color for the group. Absent = keep the current color rule. */
@@ -419,7 +419,7 @@ export type CloseTabsForKeyMessage = {
   id: number
   method: 'closeTabsForKey'
   params: {
-    /** Owning CLI session id */
+    /** Opaque session ownership key */
     key: string
   }
 }
@@ -432,7 +432,7 @@ export type CloseTabsForKeyResult = {
 export type CreateInitialTabParams = {
   /** Tab group title the auto-created tab joins (default 'playwriter') */
   tabGroup?: string
-  /** Owning CLI session id (see ForwardCDPCommand.tabGroupKey) */
+  /** Opaque session ownership key (see ForwardCDPCommand.tabGroupKey) */
   tabGroupKey?: string
   /** Explicit tab group color (see ForwardCDPCommand.tabGroupColor) */
   tabGroupColor?: TabGroupColor

@@ -10,4 +10,4 @@ The extension closes the tabs, using the session ownership it already tracks for
 
 Popups opened from a session's tab (`window.open`, `target=_blank`) now also belong to that session, so `session update --tab-group` moves them together with the session's tabs.
 
-Tab ownership now survives relay restarts safely: the relay tags tabs with a per-start id plus the session id, so a new session `1` after a restart never owns (or closes) tabs of the old session `1`.
+Relay restarts no longer mix up tab ownership: tabs are tagged with a per-relay-start id plus the session id, so a new session `1` never owns or closes tabs of an older session `1`, and a stale `close()` from before the restart is refused instead of deleting the new session. Tabs from before a relay restart stay open.

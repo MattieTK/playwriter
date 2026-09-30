@@ -2610,6 +2610,9 @@ export async function startPlayWriterCDPRelayServer({
     return c.json({
       id: sessionId,
       mode: 'extension' as const,
+      // SDK connections send this back on delete, so a stale close after a relay restart
+      // cannot delete the new session that reused the same id
+      ownershipKey: ownershipKey(sessionId),
       extensionId: metadata.extensionId,
       browser: metadata.browser,
       profile: metadata.profile,
@@ -2723,11 +2726,16 @@ export async function startPlayWriterCDPRelayServer({
 
   app.post('/cli/session/delete', async (c) => {
     try {
-      const body: { sessionId: string | number; closeCreatedTabs?: boolean } = await c.req.json()
+      const body: { sessionId: string | number; closeCreatedTabs?: boolean; ownershipKey?: string } =
+        await c.req.json()
       const sessionId = normalizeSessionId(body.sessionId)
 
       if (!sessionId) {
         return c.json({ error: 'sessionId is required' }, 400)
+      }
+
+      if (body.ownershipKey !== undefined && body.ownershipKey !== ownershipKey(sessionId)) {
+        return c.json({ error: `Session ${sessionId} belongs to another relay start; nothing deleted` }, 409)
       }
 
       const manager = await getExecutorManager()
