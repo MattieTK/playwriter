@@ -350,4 +350,58 @@ describe('Session tab groups', () => {
       body: JSON.stringify({ sessionId: created.id }),
     })
   }, 60000)
+
+  it('deleting a session with closeCreatedTabs closes only its own tabs, not same-group tabs of other sessions', async () => {
+    const newSession = async () => {
+      const response = await fetch(`${SERVER_URL}/cli/session/new`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ tabGroup: 'agent-shared' }),
+      })
+      return ((await response.json()) as { id: string }).id
+    }
+    const first = await newSession()
+    const second = await newSession()
+
+    for (const sessionId of [first, second]) {
+      const result = await executeCli({
+        sessionId,
+        code: js`
+          state.ownPage = await context.newPage();
+          await state.ownPage.goto('about:blank');
+          state.popup = await Promise.all([
+            state.ownPage.waitForEvent('popup'),
+            state.ownPage.evaluate(() => { window.open('about:blank') }),
+          ]).then(([popup]) => popup);
+        `,
+      })
+      expect(result.isError).toBeFalsy()
+    }
+    await waitForGroups((g) => g.some((group) => group.title === 'agent-shared' && group.tabCount === 4))
+
+    await fetch(`${SERVER_URL}/cli/session/delete`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId: first, closeCreatedTabs: true }),
+    })
+
+    // first session's tab and its popup are closed, second session's two tabs stay
+    const groups = await waitForGroups((g) => g.find((group) => group.title === 'agent-shared')?.tabCount === 2)
+    expect(groups.find((g) => g.title === 'agent-shared')?.tabCount).toBe(2)
+    const survivors = await executeCli({
+      sessionId: second,
+      code: js`
+        return [state.ownPage.isClosed(), state.popup.isClosed()];
+      `,
+    })
+    expect(survivors.text).toMatchInlineSnapshot(`"[return value] [ false, false ]"`)
+
+    await fetch(`${SERVER_URL}/cli/session/delete`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId: second, closeCreatedTabs: true }),
+    })
+    const cleaned = await waitForGroups((g) => !g.some((group) => group.title === 'agent-shared'))
+    expect(cleaned.some((g) => g.title === 'agent-shared')).toBe(false)
+  }, 60000)
 })

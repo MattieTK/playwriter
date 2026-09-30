@@ -62,7 +62,7 @@ Node programs and TypeScript SDKs use the `playwriter` package as a library. Do 
 ```ts
 import { connectViaExtension } from 'playwriter'
 
-// auto-closes at scope end, also on throw: closes its pages, deletes the session
+// auto-closes at scope end, also on throw: closes only tabs it opened, deletes the session
 await using connection = await connectViaExtension({ tabGroup: 'docs' })
 const page = await connection.browser.contexts()[0].newPage()
 await page.goto('https://example.com')

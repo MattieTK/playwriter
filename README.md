@@ -112,7 +112,7 @@ await page.goto('https://example.com')
 // connection closes automatically when the scope ends, also on throw
 ```
 
-`tabGroupColor` is typed as Chrome's tab group colors. `await using` calls `close()` at scope end: it closes leftover pages, disconnects CDP, and deletes the session. Without `await using`, call `await connection.close()` in `finally`.
+`tabGroupColor` is typed as Chrome's tab group colors. `await using` calls `close()` at scope end: it closes the tabs this connection opened (never other sessions' tabs), disconnects CDP, and deletes the session. Without `await using`, call `await connection.close()` in `finally`.
 
 If the extension runs in more than one browser or profile, pass `selectBrowser`. It gets every connected browser and returns the one to use:
 
