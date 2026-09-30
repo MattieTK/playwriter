@@ -9,3 +9,5 @@ The extension closes the tabs, using the session ownership it already tracks for
 `deleteRelaySession({ sessionId, closeCreatedTabs: true })` exposes the same cleanup for custom clients and returns `{ warning }`.
 
 Popups opened from a session's tab (`window.open`, `target=_blank`) now also belong to that session, so `session update --tab-group` moves them together with the session's tabs.
+
+Tab ownership now survives relay restarts safely: the relay tags tabs with a per-start id plus the session id, so a new session `1` after a restart never owns (or closes) tabs of the old session `1`.

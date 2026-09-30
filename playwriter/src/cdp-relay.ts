@@ -130,6 +130,10 @@ export async function startPlayWriterCDPRelayServer({
   const emitter = new EventEmitter()
   const store = relayState.createRelayStore()
   const extensionDownloadBehavior = new Map<string, Protocol.Browser.SetDownloadBehaviorRequest>()
+  // Tab ownership key the extension stores as groupKey. Session ids restart at "1" on every relay
+  // start while the extension keeps tabs and their keys, so the key includes a per-relay-start id.
+  const relayInstanceId = crypto.randomUUID()
+  const ownershipKey = (sessionId: string) => `${relayInstanceId}:${sessionId}`
 
   const resolvedCdpLogger = cdpLogger || createCdpLogger()
   const logCdpJson = (entry: CdpLogEntry) => {
@@ -664,7 +668,7 @@ export async function startPlayWriterCDPRelayServer({
     const resolvedExtensionId = conn?.id || extensionId
     const client = clientId ? store.getState().playwrightClients.get(clientId) : undefined
     const clientTabGroup = client?.tabGroup
-    const clientSessionKey = client?.sessionId
+    const clientSessionKey = client?.sessionId ? ownershipKey(client.sessionId) : undefined
     const clientTabGroupColor = client?.tabGroupColor
     switch (method) {
       case 'Browser.getVersion': {
@@ -2540,7 +2544,7 @@ export async function startPlayWriterCDPRelayServer({
             params: {
               from: DEFAULT_TAB_GROUP_TITLE,
               to: tabGroup,
-              key: sessionId,
+              key: ownershipKey(sessionId),
               color: tabGroupColor || undefined,
             },
             timeout: 10000,
@@ -2684,7 +2688,7 @@ export async function startPlayWriterCDPRelayServer({
           params: {
             from: previousTabGroup,
             to: nextTabGroup,
-            key: sessionId,
+            key: ownershipKey(sessionId),
             color: tabGroupColor || undefined,
           },
           timeout: 10000,
@@ -2728,28 +2732,24 @@ export async function startPlayWriterCDPRelayServer({
 
       const manager = await getExecutorManager()
       const extensionId = manager.getSession(sessionId)?.getSessionMetadata().extensionId
-      // The extension owns tab ownership: tabs a session creates (and their popups) carry
-      // groupKey = session id. Old extensions reply `{id}` with no result, so tabs stay open.
-      const closeTabsWarning: string | undefined = await (async () => {
-        if (!body.closeCreatedTabs || !extensionId) {
-          return undefined
+      // The extension tracks tab ownership: tabs a session creates (and their popups) carry its
+      // ownership key. Old extensions reply `{id}` with no result, so tabs stay open.
+      let closeTabsWarning: string | undefined
+      if (body.closeCreatedTabs && extensionId) {
+        try {
+          const result = (await sendToExtension({
+            extensionId,
+            method: 'closeTabsForKey',
+            params: { key: ownershipKey(sessionId) },
+            timeout: 10000,
+          })) as CloseTabsForKeyResult | undefined
+          if (result?.success !== true) {
+            closeTabsWarning = 'Your Playwriter extension is too old to close session tabs. Update the extension.'
+          }
+        } catch (error) {
+          closeTabsWarning = `Could not close session tabs: ${error instanceof Error ? error.message : String(error)}`
         }
-        const result = (await sendToExtension({
-          extensionId,
-          method: 'closeTabsForKey',
-          params: { key: sessionId },
-          timeout: 10000,
-        }).catch((error: unknown) => {
-          return { error: error instanceof Error ? error.message : String(error) }
-        })) as CloseTabsForKeyResult | { error: string } | undefined
-        if (result && 'error' in result) {
-          return `Could not close session tabs: ${result.error}`
-        }
-        if (result?.success !== true) {
-          return 'Your Playwriter extension is too old to close session tabs. Update the extension.'
-        }
-        return undefined
-      })()
+      }
 
       const deleted = await manager.deleteExecutor(sessionId)
 

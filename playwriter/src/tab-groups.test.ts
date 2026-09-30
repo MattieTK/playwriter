@@ -377,13 +377,15 @@ describe('Session tab groups', () => {
       })
       expect(result.isError).toBeFalsy()
     }
-    await waitForGroups((g) => g.some((group) => group.title === 'agent-shared' && group.tabCount === 4))
+    const before = await waitForGroups((g) => g.some((group) => group.title === 'agent-shared' && group.tabCount === 4))
+    expect(before.find((g) => g.title === 'agent-shared')?.tabCount).toBe(4)
 
-    await fetch(`${SERVER_URL}/cli/session/delete`, {
+    const deleteResponse = await fetch(`${SERVER_URL}/cli/session/delete`, {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify({ sessionId: first, closeCreatedTabs: true }),
     })
+    expect(await deleteResponse.json()).toEqual({ success: true })
 
     // first session's tab and its popup are closed, second session's two tabs stay
     const groups = await waitForGroups((g) => g.find((group) => group.title === 'agent-shared')?.tabCount === 2)

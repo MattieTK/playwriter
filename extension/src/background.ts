@@ -1008,11 +1008,19 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
     const tabIds = [...store.getState().tabs]
       .filter(([, info]) => info.groupKey === key)
       .map(([tabId]) => tabId)
-    const closing = tabIds.length > 0 ? chrome.tabs.remove(tabIds) : Promise.resolve()
-    void closing.then(
-      () => sink.send({ id: message.id, result: { success: true, closedTabs: tabIds.length } satisfies CloseTabsForKeyResult }),
-      (error: Error) => sink.send({ id: message.id, error: error.message }),
-    )
+    // One call per tab: chrome.tabs.remove([...]) stops at the first id that fails, e.g. a tab
+    // the user closed meanwhile, and would leave the remaining tabs open.
+    void Promise.allSettled(tabIds.map((tabId) => chrome.tabs.remove(tabId))).then((results) => {
+      const errors = results
+        .flatMap((r) => (r.status === 'rejected' ? [String(r.reason?.message ?? r.reason)] : []))
+        .filter((error) => !error.startsWith('No tab with id'))
+      if (errors.length > 0) {
+        sink.send({ id: message.id, error: errors.join('; ') })
+        return
+      }
+      const closedTabs = results.filter((r) => r.status === 'fulfilled').length
+      sink.send({ id: message.id, result: { success: true, closedTabs } satisfies CloseTabsForKeyResult })
+    })
     return
   }
 
@@ -1022,8 +1030,8 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
   // to serialize with sync.
   //
   // Ownership rules (group titles are NOT identities):
-  // - Keys from tunneled relays are namespaced (resolveTabGroupKey), so a remote
-  //   session "1" never owns the tabs of local session "1".
+  // - Remote updates apply only to tabs in that tunnel's scope, regardless of
+  //   their current title or owning local session.
   // - Renaming FROM the shared default group only moves tabs created by the
   //   requesting session (`key`), never manually toggled or other sessions' tabs.
   // - Renaming a custom group moves everything currently titled `from` (that is

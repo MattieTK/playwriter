@@ -540,7 +540,8 @@ export async function connectViaExtension({
       await browser.close().catch(() => undefined)
       const { warning } = await deleteRelaySession({ port, sessionId: session.id, closeCreatedTabs: true })
       if (warning) {
-        logger?.log(warning)
+        // default sink so SDK users without a logger still learn their extension is too old
+        ;(logger?.log ?? console.warn)(warning)
       }
     })()
     return closing
