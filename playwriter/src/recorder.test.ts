@@ -10,13 +10,29 @@ import { chromium } from '@xmorse/playwright-core'
 import { getCdpUrl } from './utils.js'
 import { getCDPSessionForPage } from './cdp-session.js'
 import { parseRecording, projectThinEvent, sanitizeRecordedBody, sanitizeRecordedUrl } from './action-recorder.js'
-import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, type TestContext } from './test-utils.js'
+import {
+  setupTestContext,
+  cleanupTestContext,
+  getExtensionServiceWorker,
+  createSimpleServer,
+  type TestContext,
+} from './test-utils.js'
 import './test-declarations.js'
 
 const TEST_PORT = 19997
 const SERVER_URL = `http://127.0.0.1:${TEST_PORT}`
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
+
+// Tests share one Chrome. A leftover session keeps its disabled recorder
+// bindings on every page, so delete each session when its test ends.
+async function deleteSession(sessionId: string) {
+  await fetch(`${SERVER_URL}/cli/session/delete`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify({ sessionId }),
+  })
+}
 
 describe('recorded network redaction', () => {
   it('redacts URL and structured body secrets while keeping useful fields', () => {
@@ -391,6 +407,7 @@ describe('action recording', () => {
     ])
     expect(fills3[0].text).toBe('[redacted]')
 
+    await deleteSession(session.id)
     await browser.close()
   }, 120000)
 
@@ -399,7 +416,7 @@ describe('action recording', () => {
     const serviceWorker = await getExtensionServiceWorker(browserContext)
 
     const page = await browserContext.newPage()
-    await page.goto('https://example.com/')
+    await page.goto('https://example.com/?second-client')
     await page.bringToFront()
     await serviceWorker.evaluate(async () => {
       await globalThis.toggleExtensionForActiveTab()
@@ -436,7 +453,7 @@ describe('action recording', () => {
 
     const cdpPage = extraContext!
       .pages()
-      .find((p) => p.url().includes('example.com'))
+      .find((p) => p.url().includes('?second-client'))
     expect(cdpPage).toBeDefined()
     await cdpPage!.evaluate(() => {
       document.body.innerHTML = `<button id="only-once">Only once</button>`
@@ -458,10 +475,153 @@ describe('action recording', () => {
     const stop = (await stopResponse.json()) as { filePath: string }
     const events = parseRecording(fs.readFileSync(stop.filePath, 'utf-8'))
     const clicks = events.filter((e) => e.type === 'action' && e.action === 'click')
-    expect(clicks.map((e) => e.code)).toEqual([
-      "await page1.getByRole('button', { name: 'Only once' }).click();",
+    // Page alias depends on tabs left by earlier tests, so ignore the number
+    expect(clicks.map((e) => String(e.code).replace(/page\d+/, 'page'))).toEqual([
+      "await page.getByRole('button', { name: 'Only once' }).click();",
     ])
 
+    await deleteSession(session.id)
     await extraBrowser.close()
+  }, 120000)
+
+  // New tabs only reach the recorder if the extension attaches them: popup
+  // windows via relocation, modifier/middle/_blank tabs via tab group inheritance.
+  it('records popup windows and links opened in new tabs', async () => {
+    const htmlServer = await createSimpleServer({
+      routes: {
+        '/opener': `<!doctype html><html><body>
+          <button id="open-popup" onclick="window.open('/popup-target', '', 'width=400,height=300,popup=1')">Open popup</button>
+          <p><a id="mod-link" href="/mod-target">Modifier link</a></p>
+          <p><a id="middle-link" href="/middle-target">Middle link</a></p>
+          <p><a id="blank-link" href="/blank-target" target="_blank">Blank link</a></p>
+        </body></html>`,
+        // Headless keeps the relocated tab at 400x300; padding keeps the button
+        // below the top-center Playwriter toolbar.
+        '/popup-target': `<!doctype html><html><body style="padding-top:80px"><button id="in-popup">Inside popup</button></body></html>`,
+        '/mod-target': `<!doctype html><html><body><button id="in-mod">Inside modifier tab</button></body></html>`,
+        '/middle-target': `<!doctype html><html><body><h1>Middle target</h1></body></html>`,
+        '/blank-target': `<!doctype html><html><body><h1>Blank target</h1></body></html>`,
+      },
+    })
+    const browserContext = testCtx!.browserContext
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+
+    const page = await browserContext.newPage()
+    await page.goto(`${htmlServer.baseUrl}/opener`)
+    await page.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+
+    const sessionResponse = await fetch(`${SERVER_URL}/cli/session/new`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({}),
+    })
+    const session = (await sessionResponse.json()) as { id: string }
+    const startResponse = await fetch(`${SERVER_URL}/recorder/start`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ sessionId: session.id }),
+    })
+    const start = (await startResponse.json()) as { recordingId: string; error?: string }
+    expect(start.error).toBeUndefined()
+
+    const browser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    const base = htmlServer.baseUrl
+    const waitForPage = async (pathname: string) => {
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline) {
+        const found = browser
+          .contexts()[0]
+          .pages()
+          .find((p) => p.url() === `${base}${pathname}`)
+        if (found) {
+          return found
+        }
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      throw new Error(`Page ${pathname} was not attached`)
+    }
+    const clickIn = async ({
+      target,
+      selector,
+      button = 'left',
+      modifiers = 0,
+    }: {
+      target: Awaited<ReturnType<typeof waitForPage>>
+      selector: string
+      button?: 'left' | 'middle'
+      modifiers?: number
+    }) => {
+      const cdp = await getCDPSessionForPage({ page: target })
+      const box = await target.locator(selector).boundingBox()
+      expect(box).toBeTruthy()
+      const x = box!.x + box!.width / 2
+      const y = box!.y + box!.height / 2
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: 1, modifiers })
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount: 1, modifiers })
+    }
+    // CDP modifiers bitfield: Ctrl=2, Meta=4. Cmd+click on mac, Ctrl+click elsewhere.
+    const newTabModifier = process.platform === 'darwin' ? 4 : 2
+    const opener = await waitForPage('/opener')
+
+    await clickIn({ target: opener, selector: '#open-popup' })
+    await clickIn({ target: await waitForPage('/popup-target'), selector: '#in-popup' })
+    await clickIn({ target: opener, selector: '#mod-link', modifiers: newTabModifier })
+    await clickIn({ target: await waitForPage('/mod-target'), selector: '#in-mod' })
+    await clickIn({ target: opener, selector: '#middle-link', button: 'middle' })
+    await waitForPage('/middle-target')
+    await clickIn({ target: opener, selector: '#blank-link' })
+    await waitForPage('/blank-target')
+    // let the recorder flush the last actions and signals
+    await new Promise((r) => setTimeout(r, 500))
+
+    const stopResponse = await fetch(`${SERVER_URL}/recorder/stop`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ recordingId: start.recordingId }),
+    })
+    const stop = (await stopResponse.json()) as { filePath: string }
+    const events = parseRecording(fs.readFileSync(stop.filePath, 'utf-8'))
+    // Alias numbers depend on tabs left by earlier tests: renumber by first use
+    const aliases = new Map<string, string>()
+    const timeline = events
+      .filter((e) => ['action', 'page-opened', 'signal'].includes(e.type))
+      .map((e) => {
+        return [e.type, e.action || e.signal, e.code || e.url, e.pageAlias && `alias=${e.pageAlias}`]
+          .filter(Boolean)
+          .join(' ')
+          .split(base)
+          .join('BASE')
+          .replace(/\bpage\d+\b/g, (alias) => {
+            if (!aliases.has(alias)) {
+              aliases.set(alias, `page${aliases.size + 1}`)
+            }
+            return aliases.get(alias)!
+          })
+      })
+    expect(timeline).toMatchInlineSnapshot(`
+      [
+        "action click await page1.getByRole('button', { name: 'Open popup' }).click(); alias=page1",
+        "page-opened BASE/popup-target",
+        "signal popup alias=page1",
+        "action click await page2.getByRole('button', { name: 'Inside popup' }).click(); alias=page2",
+        "action click await page1.getByRole('link', { name: 'Modifier link' }).click({ modifiers: ['ControlOrMeta'] }); alias=page1",
+        "page-opened BASE/mod-target",
+        "action openPage const page3 = await context.newPage(); await page3.goto('BASE/mod-target'); alias=page3",
+        "action click await page3.getByRole('button', { name: 'Inside modifier tab' }).click(); alias=page3",
+        "action click await page1.getByRole('link', { name: 'Middle link' }).click({ button: 'middle' }); alias=page1",
+        "page-opened BASE/middle-target",
+        "action openPage const page4 = await context.newPage(); await page4.goto('BASE/middle-target'); alias=page4",
+        "action click await page1.getByRole('link', { name: 'Blank link' }).click(); alias=page1",
+        "page-opened BASE/blank-target",
+        "signal popup alias=page1",
+      ]
+    `)
+
+    await deleteSession(session.id)
+    await browser.close()
+    await htmlServer.close()
   }, 120000)
 })

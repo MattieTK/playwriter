@@ -7,6 +7,8 @@ import { chromium } from '@xmorse/playwright-core'
 import { getCdpUrl } from './utils.js'
 import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, type TestContext, js } from './test-utils.js'
 import { getExtensionsStatus } from './relay-client.js'
+import { startPlayWriterCDPRelayServer } from './cdp-relay.js'
+import { createFileLogger } from './create-logger.js'
 import './test-declarations.js'
 
 const TEST_PORT = 19990
@@ -1019,4 +1021,59 @@ describe('Extension Connection Tests', () => {
     await cdpBrowser.close()
     await page.close()
   }, 30000)
+})
+
+// Own relay: this test restarts it, which would break the shared MCP client above.
+describe('Extension connect during relay handshake', () => {
+  const PORT = 19998
+  let testCtx: TestContext | null = null
+
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: PORT, tempDirPrefix: 'pw-handshake-test-', toggleExtension: true })
+  }, 600000)
+
+  afterAll(async () => {
+    await cleanupTestContext(testCtx, null)
+    testCtx = null
+  })
+
+  // Regression: enabling a tab while the extension reconnects. The handshake
+  // re-attaches every 'connecting' tab, including the one being enabled; the
+  // toggle then attached it again and failed with "Another debugger is already
+  // attached", leaving a dead target in the relay.
+  it('enables a tab whose connect overlaps the relay handshake', async () => {
+    const browserContext = testCtx!.browserContext
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const page = await browserContext.newPage()
+    await page.goto('https://example.com/?handshake-race')
+    await page.bringToFront()
+
+    testCtx!.relayServer.close()
+    // Toggle only after the extension saw the close, so its connect runs the handshake
+    await serviceWorker.evaluate(async () => {
+      while (globalThis.getExtensionState().connectionState === 'connected') {
+        await new Promise((r) => setTimeout(r, 20))
+      }
+    })
+    const toggle = serviceWorker.evaluate(async () => {
+      const { isConnected, state } = await globalThis.toggleExtensionForActiveTab()
+      const tabStates = [...state.tabs.values()].map((tab) => {
+        return tab.state === 'error' ? `error: ${tab.errorText}` : tab.state
+      })
+      return { isConnected, tabStates }
+    })
+    testCtx!.relayServer = await startPlayWriterCDPRelayServer({
+      port: PORT,
+      logger: createFileLogger({ logFilePath: path.join(process.cwd(), 'relay-server.log') }),
+    })
+    expect(await toggle).toMatchInlineSnapshot(`
+      {
+        "isConnected": true,
+        "tabStates": [
+          "connected",
+          "connected",
+        ],
+      }
+    `)
+  }, 60000)
 })

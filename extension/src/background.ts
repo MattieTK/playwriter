@@ -1869,7 +1869,24 @@ async function removeRestrictedIframes(tabId: number): Promise<number> {
   }
 }
 
-async function attachTab(
+// Concurrent attaches of one tab share one promise. The relay handshake
+// re-attaches 'connecting' tabs while connectTab can attach the same tab; a
+// second chrome.debugger.attach fails with "Another debugger is already attached".
+const inFlightTabAttaches = new Map<number, Promise<AttachTabResult>>()
+
+function attachTab(tabId: number, options: { skipAttachedEvent?: boolean } = {}): Promise<AttachTabResult> {
+  const inFlight = inFlightTabAttaches.get(tabId)
+  if (inFlight) {
+    return inFlight
+  }
+  const attach = attachTabDebugger(tabId, options).finally(() => {
+    inFlightTabAttaches.delete(tabId)
+  })
+  inFlightTabAttaches.set(tabId, attach)
+  return attach
+}
+
+async function attachTabDebugger(
   tabId: number,
   { skipAttachedEvent = false }: { skipAttachedEvent?: boolean } = {},
 ): Promise<AttachTabResult> {
@@ -2164,6 +2181,12 @@ async function connectTab(
       // local playwriter relay is running (remote-only setups). Local relay
       // connection stays best-effort in the background.
       void connectionManager.ensureConnection().catch(() => {})
+    }
+    // The relay handshake inside ensureConnection re-attaches 'connecting' tabs,
+    // including this one. Attaching again would fail on the live debugger.
+    if (store.getState().tabs.get(tabId)?.state === 'connected') {
+      logger.debug(`Tab ${tabId} was attached by the relay handshake`)
+      return
     }
     await attachTab(tabId)
 
