@@ -458,19 +458,20 @@ export async function deleteRelaySession({
   sessionId: string
   /** Also close the tabs this session created (and popups they opened). Other sessions' tabs stay open. */
   closeCreatedTabs?: boolean
-}): Promise<void> {
+}): Promise<{ warning?: string }> {
   const response = await fetch(`http://127.0.0.1:${port}/cli/session/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, closeCreatedTabs }),
   })
   if (response.status === 404) {
-    return
+    return {}
   }
+  const result = (await response.json().catch(() => ({}))) as { error?: string; warning?: string }
   if (!response.ok) {
-    const result = (await response.json().catch(() => ({}))) as { error?: string }
     throw new Error(result.error || `Playwriter session delete failed with HTTP ${response.status}`)
   }
+  return { warning: result.warning }
 }
 
 export async function connectViaExtension({
@@ -531,13 +532,16 @@ export async function connectViaExtension({
     })
 
   // Memoized so close() followed by dispose (or double close) runs cleanup once.
-  // browser.contexts() lists every Playwriter tab, including other sessions' tabs, so the relay
-  // closes only the tabs this session created instead of closing every page we can see.
+  // browser.contexts() lists every Playwriter tab, including other sessions' tabs, so the
+  // extension closes only the tabs this session created instead of every page we can see.
   let closing: Promise<void> | undefined
   const close = () => {
     closing ??= (async () => {
       await browser.close().catch(() => undefined)
-      await deleteRelaySession({ port, sessionId: session.id, closeCreatedTabs: true })
+      const { warning } = await deleteRelaySession({ port, sessionId: session.id, closeCreatedTabs: true })
+      if (warning) {
+        logger?.log(warning)
+      }
     })()
     return closing
   }

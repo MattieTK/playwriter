@@ -18,6 +18,7 @@ import type {
   StartStreamParams,
   StopStreamParams,
   UpdateTabGroupResult,
+  CloseTabsForKeyResult,
 } from './protocol.js'
 import {
   DEFAULT_TAB_GROUP_TITLE,
@@ -129,26 +130,6 @@ export async function startPlayWriterCDPRelayServer({
   const emitter = new EventEmitter()
   const store = relayState.createRelayStore()
   const extensionDownloadBehavior = new Map<string, Protocol.Browser.SetDownloadBehaviorRequest>()
-  // Page targets each relay session created (Target.createTarget + popups they opened), keyed by
-  // session id. Every Playwright client sees every tab, so this is the only record of ownership.
-  // `/cli/session/delete` with `closeCreatedTabs` closes exactly these, never other sessions' tabs.
-  const createdTargetsBySession = new Map<string, Map<string, { extensionId: string | null }>>()
-  const recordCreatedTarget = ({
-    sessionKey,
-    targetId,
-    extensionId,
-  }: {
-    sessionKey: string
-    targetId: string
-    extensionId: string | null
-  }) => {
-    const targets = createdTargetsBySession.get(sessionKey) ?? new Map<string, { extensionId: string | null }>()
-    targets.set(targetId, { extensionId })
-    createdTargetsBySession.set(sessionKey, targets)
-  }
-  const findTargetOwner = (targetId: string): string | undefined => {
-    return [...createdTargetsBySession].find(([, targets]) => targets.has(targetId))?.[0]
-  }
 
   const resolvedCdpLogger = cdpLogger || createCdpLogger()
   const logCdpJson = (entry: CdpLogEntry) => {
@@ -787,7 +768,7 @@ export async function startPlayWriterCDPRelayServer({
       }
 
       case 'Target.createTarget': {
-        const created = (await sendToExtension({
+        return await sendToExtension({
           extensionId: resolvedExtensionId,
           method: 'forwardCDPCommand',
           params: {
@@ -798,11 +779,7 @@ export async function startPlayWriterCDPRelayServer({
             tabGroupKey: clientSessionKey,
             tabGroupColor: clientTabGroupColor,
           },
-        })) as Protocol.Target.CreateTargetResponse | undefined
-        if (clientSessionKey && created?.targetId) {
-          recordCreatedTarget({ sessionKey: clientSessionKey, targetId: created.targetId, extensionId: resolvedExtensionId })
-        }
-        return created
+        })
       }
 
       case 'Target.closeTarget': {
@@ -1803,17 +1780,6 @@ export async function startPlayWriterCDPRelayServer({
                 }),
               )
 
-              // popups belong to the session that owns the tab that opened them
-              const openerId = targetParams.targetInfo.openerId
-              const openerOwner = openerId ? findTargetOwner(openerId) : undefined
-              if (openerOwner && targetParams.targetInfo.type === 'page') {
-                recordCreatedTarget({
-                  sessionKey: openerOwner,
-                  targetId: targetParams.targetInfo.targetId,
-                  extensionId: connectionId,
-                })
-              }
-
               const cachedDownloadBehavior = extensionDownloadBehavior.get(connectionId)
               if (cachedDownloadBehavior && targetParams.targetInfo.type === 'page') {
                 void applyDownloadBehaviorToTargets({
@@ -2760,22 +2726,31 @@ export async function startPlayWriterCDPRelayServer({
         return c.json({ error: 'sessionId is required' }, 400)
       }
 
-      // Only tabs this session created. Tabs already closed make closeTarget fail; ignore that.
-      const createdTargets = createdTargetsBySession.get(sessionId)
-      createdTargetsBySession.delete(sessionId)
-      if (body.closeCreatedTabs && createdTargets) {
-        await Promise.all(
-          [...createdTargets].map(([targetId, { extensionId }]) =>
-            sendToExtension({
-              extensionId,
-              method: 'forwardCDPCommand',
-              params: { method: 'Target.closeTarget', params: { targetId }, source: 'server' },
-            }).catch(() => undefined),
-          ),
-        )
-      }
-
       const manager = await getExecutorManager()
+      const extensionId = manager.getSession(sessionId)?.getSessionMetadata().extensionId
+      // The extension owns tab ownership: tabs a session creates (and their popups) carry
+      // groupKey = session id. Old extensions reply `{id}` with no result, so tabs stay open.
+      const closeTabsWarning: string | undefined = await (async () => {
+        if (!body.closeCreatedTabs || !extensionId) {
+          return undefined
+        }
+        const result = (await sendToExtension({
+          extensionId,
+          method: 'closeTabsForKey',
+          params: { key: sessionId },
+          timeout: 10000,
+        }).catch((error: unknown) => {
+          return { error: error instanceof Error ? error.message : String(error) }
+        })) as CloseTabsForKeyResult | { error: string } | undefined
+        if (result && 'error' in result) {
+          return `Could not close session tabs: ${result.error}`
+        }
+        if (result?.success !== true) {
+          return 'Your Playwriter extension is too old to close session tabs. Update the extension.'
+        }
+        return undefined
+      })()
+
       const deleted = await manager.deleteExecutor(sessionId)
 
       if (!deleted) {
@@ -2797,7 +2772,7 @@ export async function startPlayWriterCDPRelayServer({
         }
       }
 
-      return c.json({ success: true })
+      return c.json({ success: true, warning: closeTabsWarning })
     } catch (error: any) {
       logger?.error('Delete session endpoint error:', error)
       return c.json({ error: error.message }, 500)

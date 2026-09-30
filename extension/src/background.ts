@@ -12,7 +12,7 @@ import { createStore } from 'zustand/vanilla'
 import type { ExtensionState, ConnectionState, TabState, TabInfo } from './types'
 import { initPlaywriterToolbar } from './toolbar/toolbar'
 import type { CDPEvent, Protocol } from 'playwriter/src/cdp-types'
-import type { ExtensionCommandMessage, ExtensionResponseMessage } from 'playwriter/src/protocol'
+import type { CloseTabsForKeyResult, ExtensionCommandMessage, ExtensionResponseMessage } from 'playwriter/src/protocol'
 import {
   DEFAULT_TAB_GROUP_TITLE,
   EXTENSION_INVENTORY_FAILED_CLOSE,
@@ -996,14 +996,34 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
     return
   }
 
+  // Close the tabs a session owns (groupKey === key): tabs it created and their popups.
+  // Toggled tabs and other sessions' tabs have another key or none, so they stay open.
+  if (message.method === 'closeTabsForKey') {
+    const params = message.params as { key?: string } | undefined
+    const key = params?.key || undefined
+    if (!key) {
+      sink.send({ id: message.id, error: 'closeTabsForKey requires a key' })
+      return
+    }
+    const tabIds = [...store.getState().tabs]
+      .filter(([, info]) => info.groupKey === key)
+      .map(([tabId]) => tabId)
+    const closing = tabIds.length > 0 ? chrome.tabs.remove(tabIds) : Promise.resolve()
+    void closing.then(
+      () => sink.send({ id: message.id, result: { success: true, closedTabs: tabIds.length } satisfies CloseTabsForKeyResult }),
+      (error: Error) => sink.send({ id: message.id, error: error.message }),
+    )
+    return
+  }
+
   // Update a session's tab group (rename and/or recolor): rewrite the stored
   // groupTitle/groupColor on the tabs that should follow, update the physical
   // group when safe, and let syncTabGroup converge. Runs on the tabGroupQueue
   // to serialize with sync.
   //
   // Ownership rules (group titles are NOT identities):
-  // - Remote updates apply only to tabs in that tunnel's scope, regardless of
-  //   their current title or owning local session.
+  // - Keys from tunneled relays are namespaced (resolveTabGroupKey), so a remote
+  //   session "1" never owns the tabs of local session "1".
   // - Renaming FROM the shared default group only moves tabs created by the
   //   requesting session (`key`), never manually toggled or other sessions' tabs.
   // - Renaming a custom group moves everything currently titled `from` (that is
@@ -2986,8 +3006,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         if (currentGroup) {
           const tabInfo = tabs.get(tabId)
           if (!tabInfo && !isRestrictedUrl(tab.url)) {
-            logger.debug('Tab manually added to managed group:', tabId, currentGroup.title)
-            await connectTab(tabId, { groupTitle: currentGroup.title })
+            // Chrome puts window.open / target=_blank tabs into the opener's group. Those
+            // popups belong to the opener's session, so they inherit its ownership key.
+            const sourceTabId = popupSourceTabMap.get(tabId)
+            const sourceTabInfo = sourceTabId === undefined ? undefined : tabs.get(sourceTabId)
+            logger.debug('Tab added to managed group:', tabId, currentGroup.title, 'source:', sourceTabId)
+            await connectTab(tabId, {
+              groupTitle: currentGroup.title,
+              groupKey: sourceTabInfo?.groupKey,
+              groupColor: sourceTabInfo?.groupColor,
+            })
             return
           }
           // Tab dragged between managed groups: adopt the new title so sync

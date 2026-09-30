@@ -412,6 +412,23 @@ export type UpdateTabGroupResult = {
   movedTabs: number
 }
 
+/** Sent by the relay on `/cli/session/delete` with `closeCreatedTabs` (SDK `connection.close()`).
+ *  Closes tabs whose groupKey is `key`: tabs the session created and popups they opened.
+ *  Old extensions reply `{id}` with no result; the relay then warns and tabs stay open. */
+export type CloseTabsForKeyMessage = {
+  id: number
+  method: 'closeTabsForKey'
+  params: {
+    /** Owning CLI session id */
+    key: string
+  }
+}
+
+export type CloseTabsForKeyResult = {
+  success: boolean
+  closedTabs: number
+}
+
 export type CreateInitialTabParams = {
   /** Tab group title the auto-created tab joins (default 'playwriter') */
   tabGroup?: string
