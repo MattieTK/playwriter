@@ -264,6 +264,12 @@ export function initPlaywriterToolbar(): void {
     .remote-panel.open {
       display: flex;
     }
+    /* The Playwright fork sets data-playwriter-agent on the host before each
+       hit-target check (injectedScript.ts), so agent clicks pass through. */
+    :host([data-playwriter-agent]) .toolbar,
+    :host([data-playwriter-agent]) .remote-panel {
+      pointer-events: none;
+    }
     .remote-panel button {
       display: flex;
       align-items: center;
@@ -1325,6 +1331,16 @@ export function initPlaywriterToolbar(): void {
   }
 
   renderToolbar()
+
+  // Never focusable: agent keyboard input (Tab, Enter, Space) must not reach the
+  // toolbar. preventDefault on mousedown stops a user click from focusing a
+  // button, which would let a later agent Enter press activate it.
+  stack.querySelectorAll<HTMLElement>('button, a').forEach((el) => {
+    el.tabIndex = -1
+  })
+  stack.addEventListener('mousedown', (e: MouseEvent) => {
+    e.preventDefault()
+  })
 
   // Attach host to the document (appended to <html> so it survives body rewrites)
   document.documentElement.appendChild(host)

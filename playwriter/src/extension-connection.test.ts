@@ -349,6 +349,93 @@ describe('Extension Connection Tests', () => {
     await page.close()
   }, 120000)
 
+  // Agent clicks used to fail with "<div data-playwriter-toolbar> intercepts pointer
+  // events". The Playwright fork marks the toolbar host before each hit-target check
+  // (data-playwriter-agent), the toolbar CSS goes pass-through, then restores after 1s.
+  it('lets agent clicks and keys pass through the toolbar', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const page = await browserContext.newPage()
+    const testUrl = 'https://example.com/?toolbar-pass-through'
+    await page.goto(testUrl)
+    await page.bringToFront()
+    await serviceWorker.evaluate(async () => {
+      await globalThis.toggleExtensionForActiveTab()
+    })
+    const toolbar = page.locator('[data-playwriter-toolbar="1"]').first()
+    await toolbar.waitFor()
+    const box = await toolbar.boundingBox()
+    if (!box) {
+      throw new Error('Toolbar is not visible')
+    }
+    await page.evaluate((rect) => {
+      const button = document.createElement('button')
+      button.id = 'under-toolbar'
+      button.textContent = 'under'
+      button.style.cssText = `position:fixed;left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px;z-index:1;`
+      button.addEventListener('click', () => {
+        Reflect.set(window, '__underClicks', Number(Reflect.get(window, '__underClicks') || 0) + 1)
+      })
+      document.body.appendChild(button)
+    }, box)
+
+    const directBrowser = await chromium.connectOverCDP(getCdpUrl({ port: TEST_PORT }))
+    try {
+      const agentPage = directBrowser
+        .contexts()[0]
+        .pages()
+        .find((p) => {
+          return p.url() === testUrl
+        })
+      if (!agentPage) {
+        throw new Error('Agent page not found')
+      }
+
+      await agentPage.locator('#under-toolbar').click({ timeout: 5000 })
+      await agentPage.locator('#under-toolbar').click({ position: { x: 155, y: box.height / 2 }, timeout: 5000 })
+      const focusedToolbar: boolean[] = []
+      for (let i = 0; i < 4; i++) {
+        await agentPage.keyboard.press('Tab')
+        focusedToolbar.push(
+          await agentPage.evaluate(() => {
+            return Boolean(document.activeElement?.hasAttribute('data-playwriter-toolbar'))
+          }),
+        )
+      }
+
+      const recorderResponse = await fetch(`http://127.0.0.1:${TEST_PORT}/recorder/status`)
+      const recorderStatus = (await recorderResponse.json()) as { recordings: unknown[] }
+      expect({
+        underClicks: await page.evaluate(() => {
+          return Reflect.get(window, '__underClicks')
+        }),
+        recordings: recorderStatus.recordings.length,
+        focusedToolbar: focusedToolbar.includes(true),
+      }).toMatchInlineSnapshot(`
+        {
+          "focusedToolbar": false,
+          "recordings": 0,
+          "underClicks": 2,
+        }
+      `)
+
+      // Once the agent goes idle the toolbar takes pointer input again for the user.
+      await expect
+        .poll(
+          async () => {
+            return await page.evaluate((point) => {
+              return Boolean(document.elementFromPoint(point.x, point.y)?.hasAttribute('data-playwriter-toolbar'))
+            }, { x: box.x + box.width / 2, y: box.y + box.height / 2 })
+          },
+          { timeout: 5000 },
+        )
+        .toBe(true)
+    } finally {
+      await directBrowser.close()
+      await page.close()
+    }
+  }, 120000)
+
   it('should handle new pages and toggling with persistent connection', async () => {
     const browserContext = getBrowserContext()
     const serviceWorker = await getExtensionServiceWorker(browserContext)
