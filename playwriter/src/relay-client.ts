@@ -484,9 +484,15 @@ export async function connectViaExtension({
   selectBrowser,
   tabGroup,
   tabGroupColor,
+  closeTabsOnEnd = true,
   logger,
 }: {
   port?: number
+  /**
+   * Close the tabs this connection opened (and popups they opened) on close().
+   * Set false to keep them open, so a later process can reuse them via context.pages().
+   */
+  closeTabsOnEnd?: boolean
   /**
    * Pick which browser to use when the extension runs in more than one browser
    * or profile. Return one item of the array. Called even with a single browser.
@@ -546,7 +552,7 @@ export async function connectViaExtension({
       const { warning } = await deleteRelaySession({
         port,
         sessionId: session.id,
-        closeCreatedTabs: true,
+        closeCreatedTabs: closeTabsOnEnd,
         ownershipKey: session.ownershipKey,
       })
       if (warning && logger) {

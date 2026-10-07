@@ -142,7 +142,23 @@ await page.goto('https://example.com')
 // connection closes automatically when the scope ends, also on throw
 ```
 
-`tabGroupColor` is typed as Chrome's tab group colors: `grey`, `blue`, `red`, `yellow`, `green`, `pink`, `purple`, `cyan`, `orange`. `await using` calls `close()` at scope end: it closes leftover pages, disconnects CDP, and deletes the session. It needs Node 24+ (or a TypeScript 5.2+ / tsx build). Without `await using`, call `await connection.close()` in `finally`.
+`tabGroupColor` is typed as Chrome's tab group colors: `grey`, `blue`, `red`, `yellow`, `green`, `pink`, `purple`, `cyan`, `orange`. `await using` calls `close()` at scope end: it closes the tabs this connection opened (never other sessions' tabs), disconnects CDP, and deletes the session. It needs Node 24+ (or a TypeScript 5.2+ / tsx build). Without `await using`, call `await connection.close()` in `finally`.
+
+### Keeping tabs across processes
+
+Pass `closeTabsOnEnd: false` to keep the opened tabs after `close()`. A later process finds them in `context.pages()`:
+
+```ts
+// process A
+await using a = await connectViaExtension({ tabGroup: 'job', closeTabsOnEnd: false })
+await (await a.browser.contexts()[0].newPage()).goto('https://example.com')
+
+// process B, later
+await using b = await connectViaExtension({ tabGroup: 'job' })
+const page = b.browser.contexts()[0].pages().findLast((p) => p.url().includes('example.com'))
+```
+
+`b.close()` never closes tabs that `b` did not open, so the reused tab stays open.
 
 ### Choosing a browser
 

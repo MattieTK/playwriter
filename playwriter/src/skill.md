@@ -68,6 +68,8 @@ const page = await connection.browser.contexts()[0].newPage()
 await page.goto('https://example.com')
 ```
 
+Pass `closeTabsOnEnd: false` to keep opened tabs after close, so a later process can reuse them via `context.pages()`.
+
 With several browsers or profiles connected, pass `selectBrowser: (browsers) => browsers.find((b) => b.email === 'me@work.com')`. Each item has `id` (stable), `browser` (Chrome, Brave, Ghost...), `email`.
 
 ### Remote access (control browser from another machine)

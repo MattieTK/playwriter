@@ -6,6 +6,13 @@
 
 The extension closes the tabs, using the session ownership it already tracks for tab groups. With an older extension, `close()` leaves the tabs open and logs a warning. Update the extension to get the cleanup.
 
+Pass `closeTabsOnEnd: false` to keep the opened tabs after `close()`, so a later process can reuse them:
+
+```ts
+await using connection = await connectViaExtension({ tabGroup: 'job', closeTabsOnEnd: false })
+// later, in another process: context.pages().findLast((p) => p.url().includes('example.com'))
+```
+
 `deleteRelaySession({ sessionId, closeCreatedTabs: true })` exposes the same cleanup for custom clients and returns `{ warning }`.
 
 Popups opened from a session's tab (`window.open`, `target=_blank`) now also belong to that session, so `session update --tab-group` moves them together with the session's tabs.

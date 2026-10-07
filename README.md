@@ -114,6 +114,20 @@ await page.goto('https://example.com')
 
 `tabGroupColor` is typed as Chrome's tab group colors. `await using` calls `close()` at scope end: it closes the tabs this connection opened (never other sessions' tabs), disconnects CDP, and deletes the session. Without `await using`, call `await connection.close()` in `finally`.
 
+Pass `closeTabsOnEnd: false` to keep the opened tabs after `close()`. A later process can reuse them:
+
+```ts
+// process A
+await using a = await connectViaExtension({ tabGroup: 'job', closeTabsOnEnd: false })
+await (await a.browser.contexts()[0].newPage()).goto('https://example.com')
+
+// process B, later
+await using b = await connectViaExtension({ tabGroup: 'job' })
+const page = b.browser.contexts()[0].pages().findLast((p) => p.url().includes('example.com'))
+```
+
+Tabs that `b` did not open are never closed by `b.close()`.
+
 If the extension runs in more than one browser or profile, pass `selectBrowser`. It gets every connected browser and returns the one to use:
 
 ```ts
