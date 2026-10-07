@@ -2,7 +2,6 @@ import { describe, test, expect } from 'vitest'
 import {
   buildRemoteHelloMessage,
   buildRemoteControlPrompt,
-  buildRemoteTabNotSharedError,
   buildRemoteControlUrl,
   buildRemoteUpstreamWsUrl,
   buildTunnelOrigin,
@@ -109,15 +108,12 @@ describe('remote-control', () => {
     )
     expect(() => parseRemoteControlUrl('not a url')).toThrowErrorMatchingInlineSnapshot(`[Error: Invalid remote control id: not a url]`)
   })
-  test('cdp command guards', () => {
+  test('cdp command guards allow new tabs and block profile-wide clears', () => {
     expect(getRemoteCdpCommandRejection('Page.navigate')).toBeNull()
     expect(getRemoteCdpCommandRejection('Runtime.evaluate')).toBeNull()
-    expect(getRemoteCdpCommandRejection('Target.createTarget')).toMatchInlineSnapshot(
-      `"This is a shared remote-control browser tab. You cannot create additional tabs and should not try to. The user shared exactly one tab with you (plus any popups that tab opens itself). Keep working inside the shared tab: store it with state.page = context.pages()[0] and navigate it with state.page.goto() instead of opening new pages. If you really need another tab, ask the user to open one and share it with you (they get a separate id per shared tab)."`,
-    )
-    expect(getRemoteCdpCommandRejection('Network.clearBrowserCookies')).toMatchInlineSnapshot(
-      `"Network.clearBrowserCookies is not allowed on a shared remote-control tab: it clears cookies for EVERY site in the user profile."`,
-    )
+    expect(getRemoteCdpCommandRejection('Target.createTarget')).toBeNull()
+    expect(getRemoteCdpCommandRejection('Target.closeTarget')).toBeNull()
+    expect(getRemoteCdpCommandRejection('Network.clearBrowserCookies')).toMatchInlineSnapshot(`"Network.clearBrowserCookies is not allowed over Remote control: it clears cookies for EVERY site in the user profile."`)
     expect(getRemoteCdpCommandRejection('Network.clearBrowserCache')).toBeTruthy()
   })
 
@@ -131,19 +127,19 @@ describe('remote-control', () => {
       [
         {
           "method": "Network.getAllCookies",
-          "rejection": "Network.getAllCookies is not allowed on a shared remote-control tab: it reads cookies for EVERY site in the user profile.",
+          "rejection": "Network.getAllCookies is not allowed over Remote control: it reads cookies for EVERY site in the user profile.",
         },
         {
           "method": "Storage.clearCookies",
-          "rejection": "Storage.clearCookies is not allowed on a shared remote-control tab: it clears cookies for EVERY site in the user profile.",
+          "rejection": "Storage.clearCookies is not allowed over Remote control: it clears cookies for EVERY site in the user profile.",
         },
         {
           "method": "Storage.getCookies",
-          "rejection": "Storage.getCookies is not allowed on a shared remote-control tab: it reads cookies for EVERY site in the user profile.",
+          "rejection": "Storage.getCookies is not allowed over Remote control: it reads cookies for EVERY site in the user profile.",
         },
         {
           "method": "Storage.setCookies",
-          "rejection": "Storage.setCookies is not allowed on a shared remote-control tab: it changes cookies outside the shared tab.",
+          "rejection": "Storage.setCookies is not allowed over Remote control: it changes cookies for any site in the user profile.",
         },
       ]
     `)
@@ -161,21 +157,9 @@ describe('remote-control', () => {
   test('extension method guards', () => {
     expect(getRemoteExtensionMethodRejection('forwardCDPCommand')).toBeNull()
     expect(getRemoteExtensionMethodRejection('updateTabGroup')).toBeNull()
-    expect(getRemoteExtensionMethodRejection('createInitialTab')).toContain('shared remote-control browser tab')
-    expect(getRemoteExtensionMethodRejection('startRecording')).toMatchInlineSnapshot(
-      `"Screen recording is not supported on shared remote-control tabs yet."`,
-    )
-    expect(getRemoteExtensionMethodRejection('ghost-browser')).toMatchInlineSnapshot(
-      `"Ghost Browser APIs are not available on shared remote-control tabs."`,
-    )
-  })
-
-  test('tab not shared error mentions the method', () => {
-    expect(
-      buildRemoteTabNotSharedError({ method: 'Page.navigate', sessionId: 'pw-tab-x-2' }),
-    ).toMatchInlineSnapshot(
-      `"Cannot run Page.navigate (sessionId: pw-tab-x-2): that tab is not shared over this remote-control link. You only have access to the tab the user shared (and popups it opened). Ask the user to share the other tab if you need it."`,
-    )
+    expect(getRemoteExtensionMethodRejection('createInitialTab')).toBeNull()
+    expect(getRemoteExtensionMethodRejection('startRecording')).toMatchInlineSnapshot(`"Screen recording is not supported over Remote control yet."`)
+    expect(getRemoteExtensionMethodRejection('ghost-browser')).toMatchInlineSnapshot(`"Ghost Browser APIs are not available over Remote control."`)
   })
 
   test('retries the public dial sooner after offline close 4008 than after a drop', () => {
@@ -193,14 +177,14 @@ describe('remote-control', () => {
       ]
     `)
     expect(getRemoteDialRetryMs(1006)).toBeGreaterThan(3000)
-    expect(REMOTE_EXTENSION_NOT_CONNECTED_ERROR).toMatchInlineSnapshot(`"Could not reach the shared remote-control tab. The tunnel dropped. Ask the user to confirm Remote control is still on, then retry. If they clicked Stop sharing, they need to share a fresh id."`)
+    expect(REMOTE_EXTENSION_NOT_CONNECTED_ERROR).toMatchInlineSnapshot(`"Could not reach the remote-control browser. The tunnel dropped. Ask the user to confirm Remote control is still on, then retry. If they clicked Stop sharing, they need to share a fresh id."`)
     expect(REMOTE_EXTENSION_NOT_CONNECTED_ERROR).not.toContain('chromewebstore')
   })
 
   test('prompt contains the id and the warning', () => {
     const prompt = buildRemoteControlPrompt({ id: 'abc123' })
     expect(prompt).toMatchInlineSnapshot(`
-      "Connect to my shared Chrome tab:
+      "Connect to my Chrome browser:
 
       npx -y playwriter@latest session new --remote abc123
 
@@ -261,7 +245,7 @@ describe('remote-control', () => {
     `)
   })
 
-  test('finds the shared tab session in the pushed attach event', () => {
+  test('finds the announced tab session in the pushed attach event', () => {
     const attached = decodeExtensionCdpMessage(
       '{"method":"forwardCDPEvent","params":{"method":"Target.attachedToTarget","params":{"sessionId":"pw-tab-7-1","targetInfo":{"url":"https://example.com","type":"page"}}}}',
     )

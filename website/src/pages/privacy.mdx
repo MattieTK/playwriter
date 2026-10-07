@@ -1,7 +1,7 @@
 ---
 title: Privacy policy for the Playwriter Chrome extension
 sidebarTitle: Privacy
-description: Learn what browser data Playwriter handles locally and when you explicitly share a tab through encrypted Remote control.
+description: Learn what browser data Playwriter handles locally and when you explicitly share your browser through encrypted Remote control.
 icon: lucide:shield-check
 prompt: |
   User prompt: "ok update the content. explain what needs to be updated in
@@ -76,10 +76,10 @@ Set `PLAYWRITER_TELEMETRY=0` or `DO_NOT_TRACK=1` and restart the relay with
 Remote control is **off by default**. It starts only after you click the Remote
 control toolbar button and accept a disclosure.
 
-While a share is active, the selected tab is the **starting control surface**,
-not a security boundary. Broad CDP access can expose screenshots, page content,
-URLs, network and console data, input events, cookies, authentication data, and
-browser storage beyond the visible page.
+While a share is active, the recipient can use **every tab where Playwriter is
+enabled** and open new tabs. This is not a security boundary. Broad CDP access
+can expose screenshots, page content, URLs, network and console data, input
+events, cookies, authentication data, and browser storage.
 
 The data passes through an encrypted WebSocket tunnel under
 **`playwriter.dev`**. The current tunnel implementation routes payloads in memory
@@ -161,16 +161,16 @@ specific support request that you authorize.
 - Click the **extension icon** to connect or disconnect a tab
 - Click **Remote control** and confirm before any remote tunnel starts
 - Open **Remote ON** and click **Stop sharing** to revoke the bearer link immediately
-- Close the shared tab to end its share
+- Close or disconnect the tab where you started sharing to end the share
 - Close Chrome to remove session-scoped tunnel state
 - Remove the extension to clear its browser access and local extension storage
 
 ## Security
 
 Playwriter uses **HTTPS and WSS encryption** for remote traffic. Remote control
-starts from the shared tab, but it is not a security sandbox. The recipient gets
-broad CDP access and must be fully trusted. A short denylist blocks new-tab
-creation, explicit whole-profile cookie APIs, and obvious destructive clears.
+is not a security sandbox. The recipient gets the same CDP access as a local
+Playwriter agent and must be fully trusted. A short denylist blocks only
+whole-profile cookie APIs and cache clears.
 
 No security measure can make a **bearer link** safe after it is shared with an
 untrusted recipient. Treat the link like a password.

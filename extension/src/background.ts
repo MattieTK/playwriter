@@ -33,10 +33,10 @@ import {
   REMOTE_TUNNEL_BASE_DOMAIN,
   buildRemoteHelloMessage,
   buildRemoteControlPrompt,
-  buildRemoteTabNotSharedError,
   generateTunnelId,
   getRemoteCdpCommandRejection,
   getRemoteExtensionMethodRejection,
+  namespaceRemoteTabGroupKey,
 } from 'playwriter/src/remote-control'
 // Inlined at build time via vite ?raw. Source: playwriter/src/ghost-cursor-client.ts
 import ghostCursorBundleCode from '../../playwriter/dist/ghost-cursor-client.js?raw'
@@ -291,41 +291,59 @@ let autoAttachParams: Protocol.Target.SetAutoAttachRequest | null = null
 const MAX_RECORDING_SOCKET_BUFFERED_BYTES = 16 * 1024 * 1024
 
 // ============================================================================
-// Remote control: share a tab with a remote agent through a playwriter.dev tunnel.
-// One tunnel per shared root tab; popups/new tabs the tab opens join its scope.
-// Runtime objects (WebSockets) live here; only the evidence needed to rebuild
-// tunnels after a service-worker restart is persisted in chrome.storage.session
-// as {rootTabId, tunnelId, scopeTabIds}. The tunnel URL is derived from the
-// persisted tunnelId so the shared link survives SW restarts but dies with the
-// browser session (storage.session is cleared on browser exit).
+// Remote control: share the browser with a remote agent through a playwriter.dev
+// tunnel. One tunnel per browser. A tunneled relay gets the same access as the
+// local relay: every attached tab, plus new tabs it opens (in the background, in
+// its session tab group). Only whole-profile cookie/cache commands are denied.
+//
+// Lifecycle:
+// - Share starts from the toolbar of a connected tab: the anchor tab.
+// - Stop sharing (any tab's toolbar), closing or disconnecting the anchor tab, or
+//   cancelling Chrome's debugger infobar closes the tunnel and every tunneled
+//   connection immediately.
+// - On stop, tabs attached because of the remote (created by it, or opened as
+//   target=_blank children while sharing) are detached and left open.
+//
+// Runtime objects (WebSockets) live here; only the evidence needed to rebuild the
+// tunnel after a service-worker restart is persisted in chrome.storage.session
+// as {anchorTabId, tunnelId, remoteTabIds}. The link survives SW restarts but dies
+// with the browser session (storage.session is cleared on browser exit).
 // ============================================================================
 
-type RemoteScope = { rootTabId: number; tabIds: Set<number> }
-type RemoteTunnelRuntime = { tunnel: RemoteTunnel; tunnelId: string; scope: RemoteScope; status: string }
-const remoteTunnels = new Map<number, RemoteTunnelRuntime>()
+type RemoteTunnelRuntime = {
+  tunnel: RemoteTunnel
+  tunnelId: string
+  anchorTabId: number
+  /** Tabs attached because of the remote. Detached (left open) on stop. */
+  remoteTabIds: Set<number>
+  status: string
+}
+let remoteTunnel: RemoteTunnelRuntime | null = null
 
-/** A message sink for relay-bound responses. Local relay has no remoteScope. */
-type RelayMessageSink = { send(message: any): void; remoteScope?: RemoteScope }
-/** Active relay connections arriving through tunnels, keyed by tunnelId:connId. */
-const remoteRelayConnections = new Map<string, { send(message: any): void; scope: RemoteScope }>()
+/**
+ * A message sink for relay-bound responses: the local relay, or a tunneled relay
+ * bound to the runtime that accepted it (so work can check it was not revoked).
+ */
+type RelayMessageSink = { send(message: any): void; remoteRuntime?: RemoteTunnelRuntime }
+/** Active relay connections arriving through the tunnel, keyed by tunnelId:connId. */
+const remoteRelayConnections = new Map<string, { send(message: any): void }>()
 
-function findRemoteRuntimeForTab(tabId: number): RemoteTunnelRuntime | undefined {
-  for (const runtime of remoteTunnels.values()) {
-    if (runtime.scope.tabIds.has(tabId)) {
-      return runtime
-    }
+// No relay consumes the tabs anymore: drop debuggers so a later reconnect re-attaches fresh.
+function detachAllTabDebuggers(): void {
+  for (const tabId of store.getState().tabs.keys()) {
+    chrome.debugger.detach({ tabId }).catch((err) => {
+      logger.debug('Error detaching from tab:', tabId, err.message)
+    })
   }
-  return undefined
+  childSessions.clear()
 }
 
-function getAllRemoteScopedTabIds(): Set<number> {
-  const ids = new Set<number>()
-  for (const runtime of remoteTunnels.values()) {
-    for (const id of runtime.scope.tabIds) {
-      ids.add(id)
-    }
-  }
-  return ids
+function markAllTabsConnecting(tabs: Map<number, TabInfo>): Map<number, TabInfo> {
+  return new Map(
+    Array.from(tabs.entries()).map(([tabId, tab]) => {
+      return [tabId, { ...tab, state: 'connecting' as const }]
+    }),
+  )
 }
 
 export function sendRecordingCancellation(tabId: number): void {
@@ -588,25 +606,11 @@ class ConnectionManager {
     const isExtensionInUse = reason === 'Extension Already In Use' || code === 4002
     this.preserveTabsOnDetach = !(isExtensionReplaced || isExtensionInUse)
 
-    // Tabs shared over remote-control tunnels must survive local relay
-    // disconnects — remote agents keep driving them without any local playwriter.
-    const remoteTabIds = getAllRemoteScopedTabIds()
-
-    const { tabs } = store.getState()
-
-    for (const [tabId] of tabs) {
-      if (remoteTabIds.has(tabId)) {
-        continue
-      }
-      chrome.debugger.detach({ tabId }).catch((err) => {
-        logger.debug('Error detaching from tab:', tabId, err.message)
-      })
-    }
-
-    for (const [childSessionId, child] of Array.from(childSessions.entries())) {
-      if (!remoteTabIds.has(child.tabId)) {
-        childSessions.delete(childSessionId)
-      }
+    // With Remote control on, the tunnel still consumes every attached tab:
+    // remote agents keep driving them without any local playwriter.
+    const keepTabsForRemote = remoteTunnel !== null
+    if (!keepTabsForRemote) {
+      detachAllTabDebuggers()
     }
     this.ws = null
 
@@ -623,11 +627,8 @@ class ConnectionManager {
           : 'Rejected: another Playwriter extension is actively in use',
       )
       store.setState((state) => {
-        const remoteOnlyTabs = new Map(
-          Array.from(state.tabs.entries()).filter(([tabId]) => remoteTabIds.has(tabId)),
-        )
         return {
-          tabs: remoteOnlyTabs,
+          tabs: keepTabsForRemote ? state.tabs : new Map(),
           connectionState: 'extension-replaced' as ConnectionState,
           errorText,
         }
@@ -637,14 +638,11 @@ class ConnectionManager {
 
     // For normal disconnects, set tabs to 'connecting' state and let maintain loop handle reconnect
     store.setState((state) => {
-      const newTabs = new Map(state.tabs)
-      for (const [tabId, tab] of newTabs) {
-        if (remoteTabIds.has(tabId)) {
-          continue
-        }
-        newTabs.set(tabId, { ...tab, state: 'connecting' })
+      return {
+        tabs: keepTabsForRemote ? state.tabs : markAllTabsConnecting(state.tabs),
+        connectionState: 'idle',
+        errorText: undefined,
       }
-      return { tabs: newTabs, connectionState: 'idle', errorText: undefined }
     })
   }
 
@@ -688,17 +686,13 @@ class ConnectionManager {
 
       // Ensure tabs are in 'connecting' state when WS is not connected
       // This handles edge cases where handleClose wasn't called or state got out of sync.
-      // Remote-scoped tabs stay 'connected': their consumer is the tunnel, not the local relay.
-      const remoteTabIds = getAllRemoteScopedTabIds()
-      const currentTabs = store.getState().tabs
-      const hasConnectedTabs = Array.from(currentTabs.entries()).some(
-        ([tabId, t]) => t.state === 'connected' && !remoteTabIds.has(tabId),
-      )
-      if (hasConnectedTabs) {
+      // With Remote control on, tabs stay 'connected': the tunnel consumes them.
+      const hasConnectedTabs = Array.from(store.getState().tabs.values()).some((t) => t.state === 'connected')
+      if (hasConnectedTabs && remoteTunnel === null) {
         store.setState((state) => {
           const newTabs = new Map(state.tabs)
           for (const [tabId, tab] of newTabs) {
-            if (tab.state === 'connected' && !remoteTabIds.has(tabId)) {
+            if (tab.state === 'connected') {
               newTabs.set(tabId, { ...tab, state: 'connecting' })
             }
           }
@@ -750,7 +744,7 @@ globalThis.getExtensionState = () => store.getState()
 // @ts-ignore
 globalThis.startRemoteControlForActiveTab = startRemoteControlForActiveTab
 // @ts-ignore
-globalThis.stopRemoteControlForTab = stopRemoteControlForTab
+globalThis.stopRemoteControl = stopRemoteControl
 // @ts-ignore
 globalThis.getRemoteControlState = getRemoteControlState
 
@@ -759,8 +753,13 @@ declare global {
   var getExtensionState: () => ExtensionState
   var disconnectEverything: () => Promise<void>
   var startRemoteControlForActiveTab: () => Promise<{ url: string }>
-  var stopRemoteControlForTab: (tabId: number) => boolean
-  var getRemoteControlState: () => Array<{ rootTabId: number; url: string; status: string; scopeTabIds: number[] }>
+  var stopRemoteControl: () => boolean
+  var getRemoteControlState: () => {
+    anchorTabId: number
+    url: string
+    status: string
+    remoteTabIds: number[]
+  } | null
 }
 
 const MAX_LOG_STRING_LENGTH = 2000
@@ -863,52 +862,22 @@ function sendToLocalRelay(message: any): void {
 
 const localRelaySink: RelayMessageSink = { send: sendToLocalRelay }
 
-// Resolve which tab a forwarded CDP event belongs to, for remote scope filtering.
-// Events carry the tab session on the outer sessionId (debugger events) or the
-// inner params.sessionId (attach/detach events emitted by attachTab/detachTab).
-function resolveEventTabId(eventParams: any): number | undefined {
-  const candidates = [eventParams?.sessionId, eventParams?.params?.sessionId]
-  for (const sid of candidates) {
-    if (typeof sid !== 'string') {
-      continue
-    }
-    const bySession = getTabBySessionId(sid)
-    if (bySession) {
-      return bySession.tabId
-    }
-    const child = childSessions.get(sid)
-    if (child) {
-      return child.tabId
-    }
+function resolveTabGroupKey({ key, remote }: { key: string | undefined; remote: boolean }): string | undefined {
+  if (!key) {
+    return undefined
   }
-  const targetId = eventParams?.params?.targetId
-  if (typeof targetId === 'string') {
-    const byTarget = getTabByTargetId(targetId)
-    if (byTarget) {
-      return byTarget.tabId
-    }
-  }
-  return undefined
+  return remote ? namespaceRemoteTabGroupKey(key) : key
 }
 
-// Fan CDP events out to tunneled relay connections whose scope contains the
-// event's tab. Responses never travel here — they go through the sink of the
-// connection that issued the command. Logs and recording data stay local only.
+// Fan CDP events out to tunneled relay connections. Responses never travel here:
+// they go through the sink of the connection that issued the command. Logs and
+// recording data stay local only.
 function broadcastEventToRemoteRelays(message: any): void {
-  if (remoteRelayConnections.size === 0) {
-    return
-  }
   if (message?.method !== 'forwardCDPEvent') {
     return
   }
-  const tabId = resolveEventTabId(message.params)
-  if (tabId === undefined) {
-    return
-  }
   for (const conn of remoteRelayConnections.values()) {
-    if (conn.scope.tabIds.has(tabId)) {
-      conn.send(message)
-    }
+    conn.send(message)
   }
 }
 
@@ -942,9 +911,8 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
     return
   }
 
-  // Remote relay connections are scoped to the shared tab: block tab creation,
-  // recording, and Ghost Browser APIs with helpful errors.
-  if (sink.remoteScope) {
+  // Tunneled relays cannot use recording or Ghost Browser APIs.
+  if (sink.remoteRuntime) {
     const rejection = getRemoteExtensionMethodRejection(message.method)
     if (rejection) {
       if (message.id !== undefined) {
@@ -969,13 +937,19 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
     try {
       const initialTabParams = message.params as CreateInitialTabParams | undefined
       const groupTitle = normalizeTabGroupTitle(initialTabParams?.tabGroup) || undefined
-      const groupKey = initialTabParams?.tabGroupKey || undefined
+      const groupKey = resolveTabGroupKey({ key: initialTabParams?.tabGroupKey, remote: Boolean(sink.remoteRuntime) })
       const groupColor = normalizeTabGroupColor(initialTabParams?.tabGroupColor) || undefined
       logger.debug('Creating initial tab for Playwright client, group:', groupTitle || DEFAULT_TAB_GROUP_TITLE)
       const tab = await createTabInPreferredWindow({ url: 'about:blank', active: false })
       if (tab.id) {
-        setTabConnecting(tab.id, { groupTitle, groupKey, groupColor })
-        const { targetInfo, sessionId } = await attachTab(tab.id, { skipAttachedEvent: true })
+        const tabId = tab.id
+        setTabConnecting(tabId, { groupTitle, groupKey, groupColor })
+        const attach = () => {
+          return attachTab(tabId, { skipAttachedEvent: true })
+        }
+        const { targetInfo, sessionId } = sink.remoteRuntime
+          ? await attachForRemote({ runtime: sink.remoteRuntime, tabId, attach })
+          : await attach()
         logger.debug('Initial tab created and connected:', tab.id, 'sessionId:', sessionId)
         sink.send({
           id: message.id,
@@ -1000,7 +974,7 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
   // Toggled tabs and other sessions' tabs have another key or none, so they stay open.
   if (message.method === 'closeTabsForKey') {
     const params = message.params as { key?: string } | undefined
-    const key = params?.key || undefined
+    const key = resolveTabGroupKey({ key: params?.key, remote: Boolean(sink.remoteRuntime) })
     if (!key) {
       sink.send({ id: message.id, error: 'closeTabsForKey requires a key' })
       return
@@ -1030,8 +1004,8 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
   // to serialize with sync.
   //
   // Ownership rules (group titles are NOT identities):
-  // - Remote updates apply only to tabs in that tunnel's scope, regardless of
-  //   their current title or owning local session.
+  // - Keys from tunneled relays are namespaced (resolveTabGroupKey), so a remote
+  //   session "1" never owns the tabs of local session "1".
   // - Renaming FROM the shared default group only moves tabs created by the
   //   requesting session (`key`), never manually toggled or other sessions' tabs.
   // - Renaming a custom group moves everything currently titled `from` (that is
@@ -1050,7 +1024,8 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
           const params = message.params as { from?: string; to?: string; key?: string; color?: string } | undefined
           const from = normalizeTabGroupTitle(params?.from)
           const to = normalizeTabGroupTitle(params?.to)
-          const key = params?.key || undefined
+          const remote = Boolean(sink.remoteRuntime)
+          const key = resolveTabGroupKey({ key: params?.key, remote })
           const color = normalizeTabGroupColor(params?.color) || undefined
           if (!from || !to) {
             sink.send({ id: message.id, error: 'updateTabGroup requires non-empty from/to titles' })
@@ -1059,25 +1034,20 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
 
           const fromIsDefault = from === DEFAULT_TAB_GROUP_TITLE
           const isRename = to !== from
-          const remoteScopedTabIds = sink.remoteScope?.tabIds
           let movedTabs = 0
           store.setState((state) => {
             const newTabs = new Map(state.tabs)
             for (const [tabId, info] of newTabs) {
-              if (remoteScopedTabIds && !remoteScopedTabIds.has(tabId)) {
-                continue
-              }
-              const remoteScoped = remoteScopedTabIds?.has(tabId) === true
               if (!shouldUpdateTabGroupForTab({
                 currentTitle: info.groupTitle || DEFAULT_TAB_GROUP_TITLE,
                 currentKey: info.groupKey,
                 from,
                 key,
-                remoteScoped,
+                ownedOnly: remote,
               })) {
                 continue
               }
-              const changedTitle = (isRename || remoteScoped) && info.groupTitle !== to
+              const changedTitle = isRename && info.groupTitle !== to
               const changedColor = color !== undefined && info.groupColor !== color
               if (!changedTitle && !changedColor) {
                 continue
@@ -1097,7 +1067,8 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
           // change above) then consolidates duplicates if a group named `to`
           // already existed. Default-group updates skip this: sync moves the
           // session's tabs out (rename) or recolors the group (color-only).
-          if (!fromIsDefault && !remoteScopedTabIds) {
+          // Remote updates skip it too: a physical group may hold local tabs.
+          if (!fromIsDefault && !remote) {
             const managedTitles = await getManagedTabGroupTitles()
             if (managedTitles.has(from)) {
               const persisted = await loadManagedTabGroups()
@@ -1219,7 +1190,7 @@ async function dispatchRelayMessage(message: any, sink: RelayMessageSink): Promi
 
   const response: ExtensionResponseMessage = { id: message.id }
   try {
-    response.result = await handleCommand(message as ExtensionCommandMessage, sink.remoteScope)
+    response.result = await handleCommand(message as ExtensionCommandMessage, { remoteRuntime: sink.remoteRuntime })
   } catch (error: any) {
     logger.debug('Error handling command:', error)
     response.error = error.message
@@ -1524,12 +1495,14 @@ function getTabForCommand(msg: ExtensionCommandMessage): { tabId: number; tab: T
   return undefined
 }
 
-async function handleCommand(msg: ExtensionCommandMessage, remoteScope?: RemoteScope): Promise<any> {
+async function handleCommand(
+  msg: ExtensionCommandMessage,
+  { remoteRuntime }: { remoteRuntime?: RemoteTunnelRuntime },
+): Promise<any> {
   if (msg.method !== 'forwardCDPCommand') return
 
-  // Remote relay connections: reject tab creation and browser-wide destructive
-  // commands with helpful errors before any routing happens.
-  if (remoteScope) {
+  // Tunneled relays: reject whole-profile destructive commands before routing.
+  if (remoteRuntime) {
     const rejection = getRemoteCdpCommandRejection(msg.params.method)
     if (rejection) {
       throw new Error(rejection)
@@ -1539,10 +1512,6 @@ async function handleCommand(msg: ExtensionCommandMessage, remoteScope?: RemoteS
   const resolved = getTabForCommand(msg)
   let targetTabId = resolved?.tabId
   let targetTab = resolved?.tab
-
-  if (remoteScope && targetTabId !== undefined && !remoteScope.tabIds.has(targetTabId)) {
-    throw new Error(buildRemoteTabNotSharedError({ method: msg.params.method, sessionId: msg.params.sessionId }))
-  }
 
   const debuggee = targetTabId ? { tabId: targetTabId } : undefined
 
@@ -1558,7 +1527,6 @@ async function handleCommand(msg: ExtensionCommandMessage, remoteScope?: RemoteS
     const connectedTabIds = Array.from(store.getState().tabs.entries())
       .filter(([_, info]) => info.state === 'connected')
       .map(([tabId]) => tabId)
-      .filter((tabId) => !remoteScope || remoteScope.tabIds.has(tabId))
 
     await Promise.all(
       connectedTabIds.map(async (tabId) => {
@@ -1611,15 +1579,21 @@ async function handleCommand(msg: ExtensionCommandMessage, remoteScope?: RemoteS
       // The session's tab group title + owning session key travel on the
       // forwarded command (relay fills them from the client connection).
       const groupTitle = normalizeTabGroupTitle(msg.params.tabGroup) || undefined
-      const groupKey = msg.params.tabGroupKey || undefined
+      const groupKey = resolveTabGroupKey({ key: msg.params.tabGroupKey, remote: Boolean(remoteRuntime) })
       const groupColor = normalizeTabGroupColor(msg.params.tabGroupColor) || undefined
       logger.debug('Creating new tab with URL:', url, 'group:', groupTitle || DEFAULT_TAB_GROUP_TITLE)
       const tab = await createTabInPreferredWindow({ url, active: false })
       if (!tab.id) throw new Error('Failed to create tab')
-      setTabConnecting(tab.id, { groupTitle, groupKey, groupColor })
-      logger.debug('Created tab:', tab.id, 'waiting for it to load...')
+      const tabId = tab.id
+      setTabConnecting(tabId, { groupTitle, groupKey, groupColor })
+      logger.debug('Created tab:', tabId, 'waiting for it to load...')
       await sleep(100)
-      const { targetInfo } = await attachTab(tab.id)
+      const attach = () => {
+        return attachTab(tabId)
+      }
+      const { targetInfo } = remoteRuntime
+        ? await attachForRemote({ runtime: remoteRuntime, tabId, attach })
+        : await attach()
       return { targetId: targetInfo.targetId } satisfies Protocol.Target.CreateTargetResponse
     }
 
@@ -1755,8 +1729,7 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
     logger.debug('Ignoring debugger detach event without a tab id')
     return
   }
-  const remoteRuntime = findRemoteRuntimeForTab(tabId)
-  if (!store.getState().tabs.has(tabId) && !remoteRuntime) {
+  if (!store.getState().tabs.has(tabId)) {
     logger.debug('Ignoring debugger detach event for untracked tab:', tabId)
     return
   }
@@ -1778,18 +1751,16 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
     // Chrome's debugger info bar cancellation detaches every debugger session
     // in this extension process. Clear every tracked tab so Playwright does not
     // keep sending commands to tabs Chrome already detached from.
+    stopRemoteControl()
     for (const [detachedTabId, tab] of store.getState().tabs.entries()) {
       detachTabFromPlaywright(detachedTabId, tab)
     }
-    Array.from(remoteTunnels.keys()).map((rootTabId) => {
-      return stopRemoteControlForTab(rootTabId)
-    })
 
     store.setState({ tabs: new Map(), connectionState: 'idle', errorText: undefined })
     return
   }
 
-  if (connectionManager.preserveTabsOnDetach && !remoteRuntime) {
+  if (connectionManager.preserveTabsOnDetach && remoteTunnel === null) {
     logger.debug('Ignoring debugger detach during relay reconnect:', tabId, reason)
     return
   }
@@ -1798,13 +1769,13 @@ function onDebuggerDetach(source: chrome.debugger.Debuggee, reason: `${chrome.de
   if (tab) {
     detachTabFromPlaywright(tabId, tab)
   }
-  removeTabFromRemoteScopes(tabId)
 
   store.setState((state) => {
     const newTabs = new Map(state.tabs)
     newTabs.delete(tabId)
     return { tabs: newTabs }
   })
+  forgetRemoteTab(tabId)
 }
 
 type AttachTabResult = {
@@ -2114,7 +2085,7 @@ function syncToolbarState(tabId: number): void {
         window.__playwriterToolbarSetRecording?.(recording)
         window.__playwriterToolbarSetRemote?.(remoteActive)
       },
-      args: [toolbarRecordingId !== null, findRemoteRuntimeForTab(tabId) !== undefined],
+      args: [toolbarRecordingId !== null, remoteTunnel !== null],
     })
     .catch(() => {})
 }
@@ -2146,11 +2117,14 @@ function setRemoteStateInTab(tabId: number, active: boolean): Promise<void> {
     .catch(() => {})
 }
 
-function setRemoteStateForScope(scope: RemoteScope, active: boolean): void {
+// Every connected tab shows Remote ON while sharing, so Stop works from any tab.
+function setRemoteStateInAllTabs(active: boolean): void {
   void Promise.all(
-    Array.from(scope.tabIds).map((tabId) => {
-      return setRemoteStateInTab(tabId, active)
-    }),
+    Array.from(store.getState().tabs.entries())
+      .filter(([_, tab]) => tab.state === 'connected')
+      .map(([tabId]) => {
+        return setRemoteStateInTab(tabId, active)
+      }),
   )
 }
 
@@ -2174,7 +2148,7 @@ async function connectTab(
 
     setTabConnecting(tabId, options)
 
-    if (remoteTunnels.size === 0) {
+    if (remoteTunnel === null) {
       await connectionManager.ensureConnection()
     } else {
       // With an active remote-control tunnel, tabs must attach even when no
@@ -2281,9 +2255,8 @@ function setTabConnecting(
 async function disconnectTab(tabId: number): Promise<void> {
   logger.debug(`Disconnecting tab ${tabId}`)
 
-  // Disconnecting a remotely shared tab also revokes its remote-control link
-  // (root tab) or removes it from the shared scope (popup).
-  removeTabFromRemoteScopes(tabId)
+  // Disconnecting the anchor tab also revokes the remote-control link.
+  forgetRemoteTab(tabId)
 
   const { tabs } = store.getState()
   if (!tabs.has(tabId)) {
@@ -2336,27 +2309,83 @@ async function disconnectEverything(): Promise<void> {
 // Remote control manager
 // ============================================================================
 
-const REMOTE_TABS_STORAGE_KEY = 'playwriterRemoteTabs'
+const REMOTE_TUNNEL_STORAGE_KEY = 'playwriterRemoteTunnel'
 
-function persistRemoteTabs(): void {
-  const entries = Array.from(remoteTunnels.values()).map((runtime) => {
-    return {
-      rootTabId: runtime.scope.rootTabId,
-      tunnelId: runtime.tunnelId,
-      scopeTabIds: Array.from(runtime.scope.tabIds),
-    }
-  })
-  void chrome.storage.session.set({ [REMOTE_TABS_STORAGE_KEY]: entries }).catch(() => {})
+type PersistedRemoteTunnel = { anchorTabId: number; tunnelId: string; remoteTabIds: number[] }
+
+function persistRemoteTunnel(): void {
+  const entry: PersistedRemoteTunnel | null = remoteTunnel
+    ? {
+        anchorTabId: remoteTunnel.anchorTabId,
+        tunnelId: remoteTunnel.tunnelId,
+        remoteTabIds: Array.from(remoteTunnel.remoteTabIds),
+      }
+    : null
+  void chrome.storage.session.set({ [REMOTE_TUNNEL_STORAGE_KEY]: entry }).catch(() => {})
 }
 
-// Re-announce currently attached tabs to the local relay after it reconnects.
-// Needed for remote-scoped tabs that stayed attached while the relay was down:
-// the relay only learns targets from Target.attachedToTarget events.
-async function announceConnectedTabsToLocalRelay(socket = connectionManager.ws): Promise<void> {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    throw new Error('Local relay connection changed during target inventory')
+const REMOTE_CONTROL_STOPPED_ERROR = 'Remote control was stopped by the user.'
+
+/** Tabs whose popups and children belong to the remote: the anchor and tabs it opened. */
+function isRemoteOwnedTab({ runtime, tabId }: { runtime: RemoteTunnelRuntime; tabId: number }): boolean {
+  return tabId === runtime.anchorTabId || runtime.remoteTabIds.has(tabId)
+}
+
+// Attach a tab on behalf of a remote runtime and track it so Stop sharing
+// detaches it. Remote work can outlive Stop sharing (the attach awaits), so a tab
+// whose attach finishes after revocation is detached again and left open.
+async function attachForRemote<T>({
+  runtime,
+  tabId,
+  attach,
+}: {
+  runtime: RemoteTunnelRuntime
+  tabId: number
+  attach: () => Promise<T>
+}): Promise<T> {
+  if (remoteTunnel !== runtime) {
+    detachTab(tabId, true)
+    throw new Error(REMOTE_CONTROL_STOPPED_ERROR)
   }
-  const { tabs } = store.getState()
+  if (!runtime.remoteTabIds.has(tabId)) {
+    runtime.remoteTabIds.add(tabId)
+    persistRemoteTunnel()
+  }
+  const result = await attach()
+  if (remoteTunnel !== runtime) {
+    detachTab(tabId, true)
+    throw new Error(REMOTE_CONTROL_STOPPED_ERROR)
+  }
+  return result
+}
+
+// Anchor tab gone → revoke the link. Any other tab just leaves the cleanup set.
+function forgetRemoteTab(tabId: number): void {
+  if (remoteTunnel === null) {
+    return
+  }
+  if (remoteTunnel.anchorTabId === tabId) {
+    stopRemoteControl()
+    return
+  }
+  if (remoteTunnel.remoteTabIds.delete(tabId)) {
+    persistRemoteTunnel()
+  }
+}
+
+// Tell a freshly connected relay about every attached tab: relays only learn
+// targets from Target.attachedToTarget events. `firstTabId` goes first so it
+// becomes context.pages()[0] and the tab the playwriter.dev viewer shows.
+async function announceConnectedTabs({
+  send,
+  firstTabId,
+}: {
+  send(message: any): void
+  firstTabId?: number
+}): Promise<void> {
+  const tabs = Array.from(store.getState().tabs.entries()).sort(([a], [b]) => {
+    return Number(b === firstTabId) - Number(a === firstTabId)
+  })
   for (const [tabId, tab] of tabs) {
     if (tab.state !== 'connected' || !tab.sessionId) {
       continue
@@ -2366,7 +2395,7 @@ async function announceConnectedTabsToLocalRelay(socket = connectionManager.ws):
         { tabId },
         'Target.getTargetInfo',
       )) as Protocol.Target.GetTargetInfoResponse
-      socket.send(JSON.stringify({
+      send({
         method: 'forwardCDPEvent',
         params: {
           method: 'Target.attachedToTarget',
@@ -2376,11 +2405,24 @@ async function announceConnectedTabsToLocalRelay(socket = connectionManager.ws):
             waitingForDebugger: false,
           },
         },
-      }))
+      })
     } catch (error) {
-      logger.debug('Failed to re-announce tab to local relay:', tabId, error)
+      logger.debug('Failed to announce tab target:', tabId, error)
     }
   }
+}
+
+// Re-announce currently attached tabs to the local relay after it reconnects.
+// Needed for tabs that stayed attached for Remote control while the relay was down.
+async function announceConnectedTabsToLocalRelay(socket = connectionManager.ws): Promise<void> {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    throw new Error('Local relay connection changed during target inventory')
+  }
+  await announceConnectedTabs({
+    send: (message) => {
+      socket.send(JSON.stringify(message))
+    },
+  })
 }
 
 async function completeLocalRelayHandshake(socket: WebSocket): Promise<void> {
@@ -2420,8 +2462,8 @@ async function reattachConnectingTabsToLocalRelay(): Promise<void> {
 }
 
 // Introduce the extension without exposing local profile identity, then announce
-// the shared tab targets to the freshly connected tunneled relay.
-async function sendRemoteHelloAndTargets(conn: { send(message: any): void; scope: RemoteScope }): Promise<void> {
+// every attached tab (anchor first) to the freshly connected tunneled relay.
+async function sendRemoteHelloAndTargets(conn: { send(message: any): void }): Promise<void> {
   const browser = await detectBrowserName().catch(() => {
     return undefined
   })
@@ -2431,55 +2473,16 @@ async function sendRemoteHelloAndTargets(conn: { send(message: any): void; scope
       version: typeof __PLAYWRITER_VERSION__ !== 'undefined' ? __PLAYWRITER_VERSION__ : undefined,
     }),
   )
-
-  const { tabs } = store.getState()
-  for (const tabId of conn.scope.tabIds) {
-    const tab = tabs.get(tabId)
-    if (!tab || tab.state !== 'connected' || !tab.sessionId) {
-      continue
-    }
-    try {
-      const result = (await chrome.debugger.sendCommand(
-        { tabId },
-        'Target.getTargetInfo',
-      )) as Protocol.Target.GetTargetInfoResponse
-      conn.send({
-        method: 'forwardCDPEvent',
-        params: {
-          method: 'Target.attachedToTarget',
-          params: {
-            sessionId: tab.sessionId,
-            targetInfo: { ...result.targetInfo, attached: true },
-            waitingForDebugger: false,
-          },
-        },
-      })
-    } catch (error) {
-      logger.debug('Failed to announce remote tab target:', tabId, error)
-    }
-  }
+  await announceConnectedTabs({ send: conn.send, firstTabId: remoteTunnel?.anchorTabId })
 }
 
-async function startRemoteControlForTab(
-  tabId: number,
-  options: { tunnelId?: string; scopeTabIds?: number[] } = {},
+async function startRemoteControl(
+  anchorTabId: number,
+  options: { tunnelId?: string; remoteTabIds?: number[] } = {},
 ): Promise<{ url: string; started: boolean; id: string }> {
-  const existing = findRemoteRuntimeForTab(tabId)
-  if (existing) {
-    setRemoteStateForScope(existing.scope, true)
-    return { url: existing.tunnel.url, started: false, id: existing.tunnelId }
-  }
-
-  const scope: RemoteScope = { rootTabId: tabId, tabIds: new Set([tabId, ...(options.scopeTabIds || [])]) }
-
-  // Attach every scope tab. Works without a local relay: the tunnel is the consumer.
-  for (const scopeTabId of scope.tabIds) {
-    const tabState = store.getState().tabs.get(scopeTabId)?.state
-    if (tabState === 'connected') {
-      continue
-    }
-    setTabConnecting(scopeTabId)
-    await attachTab(scopeTabId)
+  if (remoteTunnel) {
+    setRemoteStateInAllTabs(true)
+    return { url: remoteTunnel.tunnel.url, started: false, id: remoteTunnel.tunnelId }
   }
 
   const tunnelId = options.tunnelId || generateTunnelId()
@@ -2488,11 +2491,10 @@ async function startRemoteControlForTab(
     baseDomain: REMOTE_TUNNEL_BASE_DOMAIN,
     logger,
     onStatusChange: (status, detail) => {
-      const runtime = remoteTunnels.get(tabId)
-      if (runtime) {
-        runtime.status = status
+      if (remoteTunnel?.tunnel === tunnel) {
+        remoteTunnel.status = status
       }
-      logger.debug('Remote tunnel status for tab', tabId, ':', status, detail || '')
+      logger.debug('Remote tunnel status:', status, detail || '')
     },
     onConnectionOpen: (virtualConn) => {
       const connKey = `${tunnelId}:${virtualConn.id}`
@@ -2505,7 +2507,6 @@ async function startRemoteControlForTab(
           }
           virtualConn.send(JSON.stringify(message))
         },
-        scope,
       }
       remoteRelayConnections.set(connKey, conn)
       void sendRemoteHelloAndTargets(conn)
@@ -2517,7 +2518,7 @@ async function startRemoteControlForTab(
           } catch {
             return
           }
-          void dispatchRelayMessage(parsed, { send: conn.send, remoteScope: scope })
+          void dispatchRelayMessage(parsed, { send: conn.send, remoteRuntime: runtime })
         },
         onClose: () => {
           remoteRelayConnections.delete(connKey)
@@ -2526,83 +2527,119 @@ async function startRemoteControlForTab(
     },
   })
 
-  remoteTunnels.set(tabId, { tunnel, tunnelId, scope, status: 'connecting' })
+  const runtime: RemoteTunnelRuntime = { tunnel, tunnelId, anchorTabId, remoteTabIds: new Set(), status: 'connecting' }
+  // Set before attaching so the maintain loop and relay-close handling keep
+  // these tabs 'connected' without a local relay: the tunnel is the consumer.
+  remoteTunnel = runtime
+  // Only the SW-restart restore path attaches here; a toolbar start needs a connected anchor.
+  if (store.getState().tabs.get(anchorTabId)?.state !== 'connected') {
+    try {
+      setTabConnecting(anchorTabId)
+      await attachTab(anchorTabId)
+    } catch (error) {
+      stopRemoteControl()
+      detachTab(anchorTabId, true)
+      throw error
+    }
+    // Stopped while attaching (anchor closed, debugger banner cancelled): undo our attach.
+    if (remoteTunnel !== runtime) {
+      detachTab(anchorTabId, true)
+      throw new Error(REMOTE_CONTROL_STOPPED_ERROR)
+    }
+  }
+  for (const tabId of options.remoteTabIds || []) {
+    if (tabId === anchorTabId) {
+      continue
+    }
+    const alreadyConnected = store.getState().tabs.get(tabId)?.state === 'connected'
+    if (!alreadyConnected) {
+      setTabConnecting(tabId)
+    }
+    try {
+      await attachForRemote({
+        runtime,
+        tabId,
+        attach: async () => {
+          if (!alreadyConnected) {
+            await attachTab(tabId)
+          }
+        },
+      })
+    } catch (error) {
+      if (remoteTunnel !== runtime) {
+        throw error
+      }
+      logger.debug('Failed to restore remote tab:', tabId, error)
+      forgetRemoteTab(tabId)
+      detachTab(tabId, true)
+    }
+  }
+
   tunnel.start()
-  persistRemoteTabs()
-  setRemoteStateForScope(scope, true)
-  logger.log('Remote control started for tab', tabId)
+  persistRemoteTunnel()
+  setRemoteStateInAllTabs(true)
+  logger.log('Remote control started, anchor tab', anchorTabId)
   return { url: tunnel.url, started: true, id: tunnelId }
 }
 
-function stopRemoteControlForTab(tabId: number): boolean {
-  const runtime = findRemoteRuntimeForTab(tabId)
-  if (!runtime) {
+// Closes the tunnel (and every tunneled relay connection) immediately. Tabs the
+// remote caused to attach are detached and left open; other tabs stay attached
+// for the local relay.
+function stopRemoteControl(): boolean {
+  const runtime = remoteTunnel
+  if (runtime === null) {
     return false
   }
-  setRemoteStateForScope(runtime.scope, false)
+  setRemoteStateInAllTabs(false)
+  remoteTunnel = null
   runtime.tunnel.close()
-  remoteTunnels.delete(runtime.scope.rootTabId)
-  persistRemoteTabs()
-  logger.log('Remote control stopped for tab', runtime.scope.rootTabId)
+  persistRemoteTunnel()
+  for (const tabId of runtime.remoteTabIds) {
+    detachTab(tabId, true)
+  }
+  // Tabs kept 'connected' only for the tunnel go back to waiting for the local relay.
+  if (connectionManager.ws?.readyState !== WebSocket.OPEN) {
+    const replaced = store.getState().connectionState === 'extension-replaced'
+    detachAllTabDebuggers()
+    store.setState((state) => {
+      return { tabs: replaced ? new Map() : markAllTabsConnecting(state.tabs) }
+    })
+  }
+  logger.log('Remote control stopped, anchor tab', runtime.anchorTabId)
   return true
 }
 
-// Root tab gone → revoke the whole link. Popup gone → shrink the scope.
-function removeTabFromRemoteScopes(tabId: number): void {
-  const runtime = findRemoteRuntimeForTab(tabId)
-  if (!runtime) {
-    return
-  }
-  if (runtime.scope.rootTabId === tabId) {
-    stopRemoteControlForTab(tabId)
-    return
-  }
-  void setRemoteStateInTab(tabId, false)
-  runtime.scope.tabIds.delete(tabId)
-  persistRemoteTabs()
-}
-
-// Rebuild tunnels after a service-worker restart from the persisted evidence.
-// Reuses the same tunnelId so the shared URL keeps working across SW restarts.
-async function restoreRemoteTabsAfterRestart(): Promise<void> {
+// Rebuild the tunnel after a service-worker restart from the persisted evidence.
+// Reuses the same tunnelId so the shared id keeps working across SW restarts.
+async function restoreRemoteTunnelAfterRestart(): Promise<void> {
   try {
-    const stored = await chrome.storage.session.get(REMOTE_TABS_STORAGE_KEY)
-    const entries = stored[REMOTE_TABS_STORAGE_KEY] as
-      | Array<{ rootTabId: number; tunnelId: string; scopeTabIds?: number[] }>
-      | undefined
-    if (!entries || entries.length === 0) {
+    const stored = await chrome.storage.session.get(REMOTE_TUNNEL_STORAGE_KEY)
+    const entry = stored[REMOTE_TUNNEL_STORAGE_KEY] as PersistedRemoteTunnel | null | undefined
+    if (!entry) {
       return
     }
-    for (const entry of entries) {
-      const rootExists = await chrome.tabs.get(entry.rootTabId).then(
+    const tabExists = (tabId: number): Promise<boolean> => {
+      return chrome.tabs.get(tabId).then(
         () => true,
         () => false,
       )
-      if (!rootExists) {
-        continue
-      }
-      const scopeTabIds: number[] = []
-      for (const id of entry.scopeTabIds || []) {
-        if (id === entry.rootTabId) {
-          continue
-        }
-        const exists = await chrome.tabs.get(id).then(
-          () => true,
-          () => false,
-        )
-        if (exists) {
-          scopeTabIds.push(id)
-        }
-      }
-      try {
-        await startRemoteControlForTab(entry.rootTabId, { tunnelId: entry.tunnelId, scopeTabIds })
-      } catch (error) {
-        logger.error('Failed to restore remote control for tab', entry.rootTabId, error)
-      }
     }
-    persistRemoteTabs()
+    if (!(await tabExists(entry.anchorTabId))) {
+      persistRemoteTunnel()
+      return
+    }
+    const existing = await Promise.all(
+      (entry.remoteTabIds || []).map(async (tabId) => {
+        return (await tabExists(tabId)) ? tabId : undefined
+      }),
+    )
+    await startRemoteControl(entry.anchorTabId, {
+      tunnelId: entry.tunnelId,
+      remoteTabIds: existing.filter(isTruthy),
+    })
   } catch (error) {
-    logger.debug('Failed to restore remote tabs:', error)
+    logger.error('Failed to restore remote control:', error)
+    persistRemoteTunnel()
   }
 }
 
@@ -2610,18 +2647,19 @@ async function startRemoteControlForActiveTab(): Promise<{ url: string }> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
   const tab = tabs[0]
   if (!tab?.id) throw new Error('No active tab found')
-  return await startRemoteControlForTab(tab.id)
+  return await startRemoteControl(tab.id)
 }
 
-function getRemoteControlState(): Array<{ rootTabId: number; url: string; status: string; scopeTabIds: number[] }> {
-  return Array.from(remoteTunnels.values()).map((runtime) => {
-    return {
-      rootTabId: runtime.scope.rootTabId,
-      url: runtime.tunnel.url,
-      status: runtime.status,
-      scopeTabIds: Array.from(runtime.scope.tabIds),
-    }
-  })
+function getRemoteControlState(): { anchorTabId: number; url: string; status: string; remoteTabIds: number[] } | null {
+  if (remoteTunnel === null) {
+    return null
+  }
+  return {
+    anchorTabId: remoteTunnel.anchorTabId,
+    url: remoteTunnel.tunnel.url,
+    status: remoteTunnel.status,
+    remoteTabIds: Array.from(remoteTunnel.remoteTabIds),
+  }
 }
 
 async function resetDebugger(): Promise<void> {
@@ -2783,7 +2821,7 @@ async function updateIcons(): Promise<void> {
 
 async function onTabRemoved(tabId: number): Promise<void> {
   popupSourceTabMap.delete(tabId)
-  removeTabFromRemoteScopes(tabId)
+  forgetRemoteTab(tabId)
   const { tabs } = store.getState()
   if (!tabs.has(tabId)) return
   logger.debug(`Connected tab ${tabId} was closed, disconnecting`)
@@ -2876,7 +2914,7 @@ chrome.debugger.onDetach.addListener(onDebuggerDetach)
 
 // resetDebugger detaches everything, so remote tabs must be restored after it.
 void resetDebugger().then(() => {
-  return restoreRemoteTabsAfterRestart()
+  return restoreRemoteTunnelAfterRestart()
 }).finally(() => {
   // Startup sync: clean leftover managed groups from a previous SW/browser
   // session (Chrome session restore can bring groups back while nothing is
@@ -3131,13 +3169,13 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
   void maybeAttachRemoteChildTab(details)
 })
 
-// window.open / target=_blank tabs opened FROM a remotely shared tab join its
-// scope so agent flows (OAuth redirects, payment popups, etc) keep working.
-// Popup windows are handled by the relocation listener below instead — the
-// debugger cannot attach to tabs still living in a separate popup window.
+// While sharing, window.open / target=_blank tabs opened FROM a remote-owned tab
+// (anchor or a tab the remote opened) attach so remote agent flows (OAuth
+// redirects, payment popups, etc) keep working. Popup windows are handled by the relocation listener below instead:
+// the debugger cannot attach to tabs still living in a separate popup window.
 async function maybeAttachRemoteChildTab(details: { tabId: number; sourceTabId: number }): Promise<void> {
-  const runtime = findRemoteRuntimeForTab(details.sourceTabId)
-  if (!runtime) {
+  const runtime = remoteTunnel
+  if (runtime === null || !isRemoteOwnedTab({ runtime, tabId: details.sourceTabId })) {
     return
   }
   let tab: chrome.tabs.Tab
@@ -3155,18 +3193,22 @@ async function maybeAttachRemoteChildTab(details: { tabId: number; sourceTabId: 
   if (!win || win.type !== 'normal') {
     return
   }
-  runtime.scope.tabIds.add(details.tabId)
-  persistRemoteTabs()
   if (store.getState().tabs.has(details.tabId)) {
     return
   }
   try {
     // Child tabs join the source tab's group so session tabs stay together
     const sourceTabInfo = store.getState().tabs.get(details.sourceTabId)
-    await connectTab(details.tabId, {
-      groupTitle: sourceTabInfo?.groupTitle,
-      groupKey: sourceTabInfo?.groupKey,
-      groupColor: sourceTabInfo?.groupColor,
+    await attachForRemote({
+      runtime,
+      tabId: details.tabId,
+      attach: () => {
+        return connectTab(details.tabId, {
+          groupTitle: sourceTabInfo?.groupTitle,
+          groupKey: sourceTabInfo?.groupKey,
+          groupColor: sourceTabInfo?.groupColor,
+        })
+      },
     })
   } catch (error) {
     logger.debug('Failed to attach remote child tab:', details.tabId, error)
@@ -3243,22 +3285,21 @@ chrome.windows.onCreated.addListener(async (popupWindow) => {
     } catch {
       // Chrome may have already closed the empty popup window.
     }
-    // Popups opened from a remotely shared tab join its remote scope
-    const remoteRuntime = findRemoteRuntimeForTab(sourceTabId)
     // Popups join the opener tab's group so session tabs stay together
     const sourceTabInfo = connectedTabs.get(sourceTabId)
+    // Popups of remote-owned tabs are remote work: Stop sharing detaches them.
+    const runtime = remoteTunnel && isRemoteOwnedTab({ runtime: remoteTunnel, tabId: sourceTabId }) ? remoteTunnel : null
     for (const tabId of tabIds) {
-      if (remoteRuntime) {
-        remoteRuntime.scope.tabIds.add(tabId)
-        persistRemoteTabs()
-      }
       if (connectedTabs.has(tabId)) continue
-      try {
-        await connectTab(tabId, {
+      const attach = () => {
+        return connectTab(tabId, {
           groupTitle: sourceTabInfo?.groupTitle,
           groupKey: sourceTabInfo?.groupKey,
           groupColor: sourceTabInfo?.groupColor,
         })
+      }
+      try {
+        await (runtime ? attachForRemote({ runtime, tabId, attach }) : attach())
       } catch (e) {
         logger.warn(`Failed to auto-connect relocated popup tab ${tabId}:`, e)
       }
@@ -3592,13 +3633,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     void (async () => {
       try {
-        const { started, id } = await startRemoteControlForTab(senderTabId)
+        const { started, id } = await startRemoteControl(senderTabId)
         const prompt = buildRemoteControlPrompt({ id })
         try {
           await copyTextInOffscreenDocument(prompt)
         } catch (error) {
           if (started) {
-            stopRemoteControlForTab(senderTabId)
+            stopRemoteControl()
           }
           throw error
         }
@@ -3617,8 +3658,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!senderTabId || sender.frameId !== 0 || store.getState().tabs.get(senderTabId)?.state !== 'connected') {
       return false
     }
-    stopRemoteControlForTab(senderTabId)
-    void setRemoteStateInTab(senderTabId, false)
+    stopRemoteControl()
     toastToolbar(senderTabId, 'Sharing stopped')
     playToolbarSound(senderTabId, 'click')
     return false
@@ -3633,7 +3673,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!senderTabId || sender.frameId !== 0 || store.getState().tabs.get(senderTabId)?.state !== 'connected') {
       return false
     }
-    const runtime = findRemoteRuntimeForTab(senderTabId)
+    const runtime = remoteTunnel
     if (!runtime) {
       toastToolbar(senderTabId, 'Remote control is not active')
       return false

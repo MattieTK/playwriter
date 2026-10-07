@@ -10,6 +10,7 @@ import {
   shouldDisconnectAfterTabGroupChange,
   shouldUpdateTabGroupForTab,
 } from './protocol.js'
+import { namespaceRemoteTabGroupKey } from './remote-control.js'
 
 describe('browser websocket close codes', () => {
   test('allows 1000 and 3000-4999 only', () => {
@@ -110,13 +111,21 @@ describe('normalizeTabGroupColor', () => {
 })
 
 describe('shouldUpdateTabGroupForTab', () => {
-  test('remote updates stay scoped while local default-group updates stay session-owned', () => {
+  test('default-group and remote updates stay session-owned, custom local renames move the group', () => {
     expect([
-      shouldUpdateTabGroupForTab({ currentTitle: 'research', from: 'remote', remoteScoped: true }),
       shouldUpdateTabGroupForTab({ currentTitle: 'playwriter', currentKey: '1', from: 'playwriter', key: '1' }),
       shouldUpdateTabGroupForTab({ currentTitle: 'playwriter', currentKey: '2', from: 'playwriter', key: '1' }),
+      shouldUpdateTabGroupForTab({
+        currentTitle: 'playwriter',
+        currentKey: '1',
+        from: 'playwriter',
+        key: namespaceRemoteTabGroupKey('1'),
+      }),
       shouldUpdateTabGroupForTab({ currentTitle: 'research', from: 'research' }),
-    ]).toEqual([true, true, false, true])
+      // remote renames of a custom group move only the remote session's own tabs
+      shouldUpdateTabGroupForTab({ currentTitle: 'research', currentKey: '1', from: 'research', key: 'remote:1', ownedOnly: true }),
+      shouldUpdateTabGroupForTab({ currentTitle: 'research', currentKey: 'remote:1', from: 'research', key: 'remote:1', ownedOnly: true }),
+    ]).toEqual([true, false, false, true, false, true])
   })
 })
 

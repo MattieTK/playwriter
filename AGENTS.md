@@ -97,7 +97,14 @@ keep toolbar tooltips and action toasts very short. a few words the user can rea
 
 ## github releases
 
-after publishing the CLI (`playwriter` npm package), always create GitHub releases for both the CLI and the extension (if extension code changed).
+after publishing the CLI (`playwriter` npm package), always create GitHub releases for both the CLI and the extension (if extension code changed). this is a manual step of every CLI release. `pnpm release` only builds the zip for the Chrome Web Store and never creates a GitHub release, so the extension GitHub release happens here, never skip it.
+
+check for unreleased extension changes against the last extension **GitHub release**, not the last `extension@` tag (tags are created on every manifest bump):
+
+```bash
+LAST=$(gh release list --limit 50 --json tagName -q '[.[] | select(.tagName | startswith("extension@"))][0].tagName')
+git log --oneline "$LAST"..HEAD -- extension/
+```
 
 **CLI release:**
 
@@ -120,12 +127,17 @@ rm -f playwriter-*.zip && cd extension/dist-release && zip -r ../../playwriter-$
 # create the release, uploading the zip as an asset
 VERSION=$(node -p "require('./extension/manifest.json').version")
 gh release create "extension@$VERSION" "playwriter-$VERSION.zip" --title "Extension $VERSION" --latest=false --notes "$(cat <<'EOF'
+> [!NOTE]
+> This version may not be on the Chrome Web Store yet. Store updates wait for Chrome review, which can take days.
+
 paste changelog entries here
 EOF
 )"
 ```
 
-read `extension/CHANGELOG.md` entries since the last extension GitHub release, merge them into a numbered list following the same changepub format (user-facing outcomes, sorted by relevance, no internal chores).
+always put the Chrome Web Store review note above at the top of extension release notes.
+
+read `extension/CHANGELOG.md` entries and the `extension/` commits since the last extension GitHub release, merge them into a numbered list following the same changepub format (user-facing outcomes, sorted by relevance, no internal chores).
 
 use `--latest=false` for extension releases so they don't override the CLI release as the "Latest" GitHub release. the CLI release should always be the latest one.
 

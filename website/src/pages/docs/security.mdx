@@ -56,12 +56,12 @@ The execution sandbox runs in a controlled environment:
 
 ## Remote access security
 
-When using one-tab **Remote control** (see the [full Remote control security page](./remote-control.mdx)):
+When using **Remote control** (see the [full Remote control security page](./remote-control.mdx)):
 
-- **Explicit consent.** A short confirmation, with a Read more link, explains that the recipient can view and control the tab before the tunnel starts.
-- **Not a sandbox.** The selected tab is the starting control surface, but the recipient receives broad CDP access and must be fully trusted. A short denylist blocks new-tab creation, explicit whole-profile cookie APIs, and obvious destructive clears.
+- **Explicit consent.** A short confirmation, with a Read more link, explains that the recipient can control your browser before the tunnel starts.
+- **Not a sandbox.** The recipient gets the same access as a local Playwriter agent: every Playwriter tab, plus new tabs. It must be fully trusted. A short denylist blocks only whole-profile cookie APIs and cache clears.
 - **Minimal handshake.** The extension sends the browser name and Playwriter version, not the user's email, Google account ID, or install ID.
-- **Revocable bearer link.** Anyone with the secret URL can connect until the user opens the **Remote ON** dropdown and clicks **Stop sharing**. Treat the URL like a password.
+- **Revocable bearer link.** Anyone with the secret URL can connect until the user clicks **Stop sharing** on the **Remote ON** dropdown of any Playwriter tab, or closes the tab where sharing started. Treat the URL like a password.
 - **Viewer request omits the secret.** Shared links are `https://playwriter.dev/remote-control#{id}`. The initial viewer-page request and Referer omit the fragment. The viewer then uses the id to connect to the tunnel hostname, which the tunnel service and Cloudflare necessarily process.
 - **No payload storage.** Tunnel frames are relayed in memory only, and response caching is off for these tunnels. Cloudflare can process connection metadata as the infrastructure provider.
 - **Privacy disclosure.** Remote traffic can contain screenshots, page content, URLs, input events, network data, cookies, authentication data, and browser storage. Read the [privacy policy](../privacy.mdx) before sharing sensitive tabs.

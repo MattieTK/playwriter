@@ -15,7 +15,7 @@ Playwriter MCP is a Chrome extension that enables Playwright to connect to your 
 - **MCP integration**: Exposes browser control through the Model Context Protocol
 - **CDP events**: Full access to Chrome DevTools Protocol capabilities
 - **Playwright compatible**: Connect Playwright directly to your running Chrome
-- **Remote control**: Share one selected tab through a temporary, revocable link after an explicit confirmation
+- **Remote control**: Share your browser (every Playwriter tab, plus new tabs) through a temporary, revocable link after an explicit confirmation
 
 ## How it Works
 

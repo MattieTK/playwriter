@@ -406,7 +406,7 @@ describe('Security Tests', () => {
 
 // Path-form tunnels share one host (wss://host/tunnel/{id}/extension), so the
 // relay must key remote dials by the full wsUrl so each id stays a distinct dial;
-// otherwise a second shared tab would bind to the first tunnel and replace its
+// otherwise a second shared browser would bind to the first tunnel and replace its
 // stableKey connection.
 describe('Remote control dial isolation', () => {
   const FAKE_TUNNEL_PORT = 19871

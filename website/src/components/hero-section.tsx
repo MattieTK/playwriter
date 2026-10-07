@@ -116,6 +116,8 @@ function HeroBackground({ dotColor = 'rgba(255, 106, 0, 0.7)' }: { dotColor?: st
         animSpeed={3}
         gamma={0.8}
         enableMask={false}
+        fadeTop={false}
+        fadeBottom={false}
         fluidStrength={0.15}
         fluidCurl={80}
       />

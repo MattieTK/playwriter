@@ -1010,7 +1010,7 @@ export function initPlaywriterToolbar(): void {
   const sep2 = document.createElement('div')
   sep2.className = 'separator'
 
-  // Remote control: share this tab via a secret tunnel id. While sharing, the
+  // Remote control: share the browser via a secret tunnel id. While sharing, the
   // button is a dropdown (copy prompt, copy id, or stop sharing). See remote-tunnel.ts.
   let remoteActive = false
   const REMOTE_SECURITY_URL = 'https://playwriter.dev/docs/remote-control'
@@ -1044,7 +1044,7 @@ export function initPlaywriterToolbar(): void {
   const remoteDialog = document.createElement('div')
   remoteDialog.className = 'remote-panel'
   remoteDialog.setAttribute('role', 'dialog')
-  remoteDialog.setAttribute('aria-label', 'Share this tab')
+  remoteDialog.setAttribute('aria-label', 'Share browser')
   const dialogText = document.createElement('p')
   const dialogMore = document.createElement('a')
   dialogMore.href = REMOTE_SECURITY_URL
@@ -1052,7 +1052,7 @@ export function initPlaywriterToolbar(): void {
   dialogMore.rel = 'noopener noreferrer'
   dialogMore.textContent = 'Read more'
   dialogText.append(
-    'Share this tab? Any agent you share the copied id with can control your browser. ',
+    'Share your browser? Anyone with the copied id can control all Playwriter tabs and open new ones. ',
     dialogMore,
   )
   const dialogActions = document.createElement('div')
@@ -1083,7 +1083,7 @@ export function initPlaywriterToolbar(): void {
       remoteBtn.setAttribute('aria-expanded', 'false')
       remoteBtn.setAttribute('data-tooltip', 'Remote options')
     } else {
-      remoteBtn.setAttribute('data-tooltip', 'Share this tab')
+      remoteBtn.setAttribute('data-tooltip', 'Share browser')
     }
   }
 
@@ -1116,7 +1116,7 @@ export function initPlaywriterToolbar(): void {
       return
     }
     remoteBtn.innerHTML = CLOUD_SVG + ' <span>Remote control</span>'
-    remoteBtn.setAttribute('data-tooltip', 'Share this tab')
+    remoteBtn.setAttribute('data-tooltip', 'Share browser')
     remoteBtn.setAttribute('aria-label', 'Start remote control')
     remoteBtn.removeAttribute('aria-haspopup')
     remoteBtn.removeAttribute('aria-expanded')

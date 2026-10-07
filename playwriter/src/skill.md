@@ -145,11 +145,11 @@ playwriter -s 1 -e "state.page = await context.newPage(); await state.page.goto(
 
 **Limitations:** screen recording (`recording.start`/`recording.stop`) is not available in direct CDP mode since it relies on the extension's `chrome.tabCapture` API.
 
-### Remote control (drive a tab in another user's browser)
+### Remote control (drive another user's browser)
 
-When a user shares a tab with you, they send a secret **id** (created by clicking the **Remote control** button in the Playwriter toolbar of their browser). The user needs no playwriter install, only the extension.
+When a user shares their browser with you, they send a secret **id** (created by clicking the **Remote control** button in the Playwriter toolbar). The user needs no playwriter install, only the extension.
 
-**How it works:** the extension opens a secret tunnel for that one tab. Your CLI dials it with the id and talks CDP as if the tab were local. You only have that shared tab (and popups it opened). **Do not create new tabs.** `context.newPage()` and any tab creation are rejected. If you need another tab, ask the user to share one more.
+**How it works:** the extension opens a secret tunnel. Your CLI dials it with the id and talks CDP as if the browser were local. You see every tab where the user enabled Playwriter and can open new tabs with `context.newPage()` (older extensions reject new tabs; then stay in the shared tab). `context.pages()[0]` is the tab where the user started sharing.
 
 Connect with:
 
@@ -159,13 +159,13 @@ playwriter session new --remote <id>
 playwriter -s 1 -e "state.page = context.pages()[0]; console.log(await state.page.title())"
 ```
 
-The shared tab joins the `remote` tab group. Set another title with `--tab-group <name>`.
+Tabs you open join the `remote` tab group. Set another title with `--tab-group <name>`.
 
 Rules for remote-control sessions:
 
-- The shared tab is your **starting control surface**, not a security sandbox. The user must fully trust you with broad CDP access. Store the shared tab with `state.page = context.pages()[0]` and navigate it with `state.page.goto()` instead of opening new pages.
-- The user revokes access anytime with **Stop sharing** on the Remote ON dropdown; the URL then stops working permanently. If the connection dies, ask the user for a fresh URL.
-- Never print, log, or share the tunnel URL: whoever has it can control the user's tab as them.
+- Other tabs may belong to the user or their local agents. Prefer your own pages: `state.page = context.pages()[0]` for the shared tab, or `await context.newPage()` for new work.
+- The user revokes access anytime with **Stop sharing**, or by closing the tab where sharing started; the id then stops working permanently. If the connection dies, ask the user for a fresh id.
+- Never print, log, or share the id: whoever has it can control the user's browser as them.
 - Screen recording is not available on remote-control sessions.
 
 **Use cases:** the user is logged into a website and wants you (a remote agent like Devin, a cloud bot, or a CLI agent on another machine) to act in their authenticated session without sharing passwords.

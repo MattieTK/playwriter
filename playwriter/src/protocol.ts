@@ -99,21 +99,19 @@ export function shouldUpdateTabGroupForTab({
   currentKey,
   from,
   key,
-  remoteScoped = false,
+  ownedOnly = false,
 }: {
   currentTitle: string
   currentKey?: string
   from: string
   key?: string
-  remoteScoped?: boolean
+  /** Only move tabs the session owns (`key`), even for custom groups. Used for remote-control relays. */
+  ownedOnly?: boolean
 }): boolean {
-  if (remoteScoped) {
-    return true
-  }
   if (currentTitle !== from) {
     return false
   }
-  if (from !== DEFAULT_TAB_GROUP_TITLE) {
+  if (from !== DEFAULT_TAB_GROUP_TITLE && !ownedOnly) {
     return true
   }
   return Boolean(key && currentKey === key)

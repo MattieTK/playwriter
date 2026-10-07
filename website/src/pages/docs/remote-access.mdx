@@ -6,11 +6,11 @@ icon: lucide:globe
 
 Control a Chrome browser on any machine from anywhere over the internet. No VPN, no firewall rules, no port forwarding.
 
-## Remote control: share one tab, zero setup
+## Remote control: share your browser, zero setup
 
-The simplest way to give a remote agent access to your browser is the **Remote control** button (light-blue cloud) in the Playwriter toolbar. It requires **no playwriter install** on your machine — only the extension. The extension itself opens a secret tunnel and exposes the tab behind an unguessable URL.
+The simplest way to give a remote agent access to your browser is the **Remote control** button (light-blue cloud) in the Playwriter toolbar. It requires **no playwriter install** on your machine, only the extension. The extension itself opens a secret tunnel. The agent sees every Playwriter tab and can open new ones.
 
-1. Click the **Remote control** button and confirm that the agent may read and control the tab. [Read more about security](./remote-control.mdx).
+1. Click the **Remote control** button and confirm that the agent may read and control your browser. [Read more about security](./remote-control.mdx).
 2. A prompt containing the secret URL is copied to your clipboard. Paste it to the agent.
 3. The agent runs, on its own machine:
 
@@ -19,15 +19,15 @@ playwriter session new --remote <id>
 playwriter -s 1 -e "state.page = context.pages()[0]; console.log(await state.page.title())"
 ```
 
-4. Open the **Remote ON** dropdown and click **Stop sharing** anytime to **revoke access**. The URL dies instantly and is never reused.
+4. Open the **Remote ON** dropdown in any Playwriter tab and click **Stop sharing** anytime to **revoke access**. The URL dies instantly and is never reused. Tabs the agent opened are detached and left open.
 
-The shared tab is the **starting control surface**, not a security sandbox. Remote CDP access is powerful, so the recipient must be fully trusted. A short denylist blocks new-tab creation, explicit whole-profile cookie APIs, and obvious destructive clears.
+Remote control is **not a security sandbox**. The agent gets the same access as a local Playwriter agent, so it must be fully trusted. A short denylist blocks only whole-profile cookie APIs and cache clears.
 
 ### Watch and click from any browser
 
-The same link is also a page. Open it and you get a **live view of the tab**, streamed frame by frame, with a URL bar and a **Take control** button for clicking, scrolling, and typing.
+The same link is also a page. Open it and you get a **live view of the tab where sharing started**, streamed frame by frame, with a URL bar and a **Take control** button for clicking, scrolling, and typing.
 
-That means you can share a tab with a person, not only an agent, and no install is needed on either side.
+That means you can share with a person, not only an agent, and no install is needed on either side.
 
 The tunnel id starts in the **URL fragment** (`#xxx`), so the initial viewer-page request and Referer omit it. The viewer JavaScript then uses the id to connect to the tunnel hostname, which the tunnel service and Cloudflare necessarily process.
 

@@ -2095,7 +2095,7 @@ export async function startPlayWriterCDPRelayServer({
   async function connectRemoteExtension({ url }: { url: string }): Promise<relayState.ExtensionEntry> {
     const { wsUrl } = parseRemoteControlUrl(url)
     // Key by the dialed wsUrl: it is unique per tunnel id in every accepted input
-    // form, so two shared tabs on one host never collapse into one dial.
+    // form, so two shared browsers on one host never collapse into one dial.
     const urlKey = wsUrl
     const stableKey = `remote:${crypto.createHash('sha256').update(urlKey).digest('hex')}`
 
@@ -2117,9 +2117,9 @@ export async function startPlayWriterCDPRelayServer({
     }
     const entry = relayState.findExtensionByStableKey(store.getState(), stableKey)
     if (entry?.ws) {
-      // Connected but no shared tab announced yet — surface a clear error.
+      // Connected but no tab announced yet — surface a clear error.
       throw new Error(
-        'Connected to the remote browser but no shared tab was announced. The user may have revoked remote control. Ask them to click the Remote control button again and share a fresh id.',
+        'Connected to the remote browser but no tab was announced. The user may have revoked remote control. Ask them to click the Remote control button again and share a fresh id.',
       )
     }
     throw new Error(
@@ -2550,12 +2550,12 @@ export async function startPlayWriterCDPRelayServer({
             timeout: 10000,
           })) as UpdateTabGroupResult | undefined
           if (result?.success !== true) {
-            return 'The remote Playwriter extension is too old to update the shared tab group.'
+            return 'The remote Playwriter extension is too old to update the remote tab group.'
           }
           return undefined
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          return `The remote extension could not update the shared tab group: ${message}`
+          return `The remote extension could not update the remote tab group: ${message}`
         }
       })()
       const warning = [cwdWarning, tabGroupWarning].filter(Boolean).join(' ') || undefined

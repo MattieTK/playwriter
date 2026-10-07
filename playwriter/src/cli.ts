@@ -396,7 +396,7 @@ cli
   .option('--browser <key>', 'Browser key when multiple browsers are available. Special values: "headless" (launch headless Chrome, no extension), "cloud" (cloud browser with stealth/proxies)')
   .option('--patchright', 'Use @playwriter/patchright-core for stealth mode (bypasses bot detection)')
   .option('--direct [endpoint]', 'Use direct CDP connection without the extension. Enable debugging first at chrome://inspect/#remote-debugging or launch Chrome with --remote-debugging-port=9222. Auto-discovers instances or accepts an explicit ws:// endpoint')
-  .option('--remote <id>', 'Connect to a browser tab another user shared via the extension `Remote control` button')
+  .option('--remote <id>', 'Connect to a browser another user shared via the extension `Remote control` button')
   .option('--proxy <region>', 'Enable residential proxy for cloud browser (e.g. us, de, jp). Disabled by default. Use for anti-detection or geo-targeting.')
   .option('--custom-proxy <url>', 'Custom proxy for cloud browser (host:port or user:pass@host:port)')
   .option('--timeout <minutes>', 'Cloud browser timeout in minutes (1-240, default 60)')
@@ -438,7 +438,7 @@ cli
 
     const isLocal = !options.host && !process.env.PLAYWRITER_HOST
 
-    // --remote: bind the session to a tab another user shared via the
+    // --remote: bind the session to a browser another user shared via the
     // extension Remote control button. Pass the id from the copied prompt. The
     // local relay dials the tunnel, so later `playwriter -s N -e ...` calls need
     // no extra flags.
@@ -476,8 +476,8 @@ cli
         }
         printSessionWarning(result)
         warnIfTabGroupIgnored(tabGroup || tabGroupColor, result)
-        printSessionCreated(`Session ${result.id} created (remote browser tab). Use with: playwriter -s ${result.id} -e "..."`)
-        console.log(pc.dim('The shared tab is the starting control surface. Remote control is not a security sandbox.'))
+        printSessionCreated(`Session ${result.id} created (remote browser). Use with: playwriter -s ${result.id} -e "..."`)
+        console.log(pc.dim('context.pages()[0] is the tab where the user started sharing. Remote control is not a security sandbox.'))
         console.log(pc.dim('The user can revoke access anytime with Stop sharing on the Remote ON dropdown.'))
       } catch (error: any) {
         console.error(`Error: ${error.message}`)

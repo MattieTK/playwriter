@@ -1,18 +1,23 @@
 # Security Policy
 
-## Remote control scope is best effort
+## Remote control gives browser-wide access
 
-Remote control shares one tab through a secret link. The denylist blocks new-tab
-creation, whole-profile cookie APIs, and obvious destructive clears, but the
-shared tab is the starting control surface, not a sandbox.
+Remote control shares your **browser** through a secret id. The recipient gets
+the same access as a local Playwriter agent:
 
-The shared tab can navigate anywhere in your browser, including the extension's
-own `chrome-extension://` pages. CDP evaluation in such a page reaches the full
-extension API surface: other tabs, all profile cookies, profile identity.
+- every tab where Playwriter is enabled
+- new tabs it opens (in the background, in its tab group)
+- anything those tabs can reach, including other sites and extension pages
 
-If you give a remote URL to an agent, expect that it can access other tabs too.
-Share the link only with a person or agent you fully trust, and revoke with
-**Stop sharing** when done.
+It is not a sandbox. A short denylist only blocks whole-profile cookie APIs
+(`Network.getAllCookies`, `Network.clearBrowserCookies`, `Storage.*Cookies`) and
+`Network.clearBrowserCache`, so an agent cannot nuke every login by accident.
+It does not make a malicious recipient safe.
+
+Share the id only with a person or agent you fully trust. **Stop sharing** (from
+any Playwriter tab), closing or disconnecting the tab where sharing started, or
+cancelling Chrome's debugging banner closes the tunnel immediately. Tabs the
+remote opened are then detached and left open.
 
 ## Reporting
 

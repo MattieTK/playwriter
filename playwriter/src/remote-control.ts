@@ -1,5 +1,5 @@
 /**
- * Remote control: share a browser tab through Playwriter's Cloudflare tunnel.
+ * Remote control: share the browser through Playwriter's Cloudflare tunnel.
  *
  * The extension acts as the "upstream" client (the thing being exposed).
  * A client dials wss://playwriter.dev/tunnel/{tunnelId}/extension. That is a
@@ -103,7 +103,7 @@ export function generateTunnelId(): string {
     .join('')
 }
 
-/** The link the user shares. Anyone holding it can drive the shared tab. */
+/** The link the user shares. Anyone holding it can drive the shared browser. */
 export function buildRemoteControlUrl({
   tunnelId,
   baseUrl = REMOTE_VIEWER_BASE_URL,
@@ -222,7 +222,7 @@ function resolvePathFormTunnel(
 // The tunnel speaks the extension WS protocol, not raw CDP. Commands are wrapped
 // in `forwardCDPCommand`, events arrive as `forwardCDPEvent`, and errors come back
 // as a plain string instead of the raw-CDP `{ message }` object. The viewer page
-// on playwriter.dev uses these helpers so it can drive a shared tab with the same
+// on playwriter.dev uses these helpers so it can drive the shared tab with the same
 // screencast code it uses for raw-CDP cloud browsers.
 
 export function encodeExtensionCdpCommand({
@@ -302,8 +302,8 @@ export function decodeExtensionCdpMessage(raw: string): DecodedExtensionMessage 
 }
 
 /**
- * Session id of the tab the extension shared, taken from the
- * `Target.attachedToTarget` event it pushes right after `hello`.
+ * Session id of an announced tab, taken from a `Target.attachedToTarget` event.
+ * The extension announces the tab where sharing started first, right after `hello`.
  */
 export function readAttachedTargetSession(
   message: DecodedExtensionMessage,
@@ -321,21 +321,18 @@ export function readAttachedTargetSession(
 }
 
 // ---------------------------------------------------------------------------
-// Remote scope command guards
+// Remote control command guards
 // ---------------------------------------------------------------------------
+// Remote control gives the same browser access as a local relay: every attached
+// tab, plus new tabs. It is not a sandbox; only block obvious profile-wide accidents.
 
-const REMOTE_NEW_TAB_ERROR = dedent`
-  This is a shared remote-control browser tab. You cannot create additional tabs and should not try to. The user shared exactly one tab with you (plus any popups that tab opens itself). Keep working inside the shared tab: store it with state.page = context.pages()[0] and navigate it with state.page.goto() instead of opening new pages. If you really need another tab, ask the user to open one and share it with you (they get a separate id per shared tab).
-`
-
-/** Remote control is not a sandbox; only block obvious profile-wide accidents. */
 const REMOTE_BLOCKED_CDP_COMMANDS = new Map<string, string>([
   ['Network.clearBrowserCookies', 'clears cookies for EVERY site in the user profile'],
   ['Network.clearBrowserCache', 'clears the browser cache for the whole user profile'],
   ['Network.getAllCookies', 'reads cookies for EVERY site in the user profile'],
   ['Storage.clearCookies', 'clears cookies for EVERY site in the user profile'],
   ['Storage.getCookies', 'reads cookies for EVERY site in the user profile'],
-  ['Storage.setCookies', 'changes cookies outside the shared tab'],
+  ['Storage.setCookies', 'changes cookies for any site in the user profile'],
 ])
 
 /**
@@ -343,12 +340,9 @@ const REMOTE_BLOCKED_CDP_COMMANDS = new Map<string, string>([
  * remote control connection, or null when the command is allowed.
  */
 export function getRemoteCdpCommandRejection(method: string): string | null {
-  if (method === 'Target.createTarget') {
-    return REMOTE_NEW_TAB_ERROR
-  }
   const blockedReason = REMOTE_BLOCKED_CDP_COMMANDS.get(method)
   if (blockedReason) {
-    return `${method} is not allowed on a shared remote-control tab: it ${blockedReason}.`
+    return `${method} is not allowed over Remote control: it ${blockedReason}.`
   }
   return null
 }
@@ -358,20 +352,25 @@ export function getRemoteCdpCommandRejection(method: string): string | null {
  * must be rejected on a remote control connection, or null when allowed.
  */
 export function getRemoteExtensionMethodRejection(method: string): string | null {
-  if (method === 'createInitialTab') {
-    return REMOTE_NEW_TAB_ERROR
-  }
   if (method === 'startRecording' || method === 'stopRecording' || method === 'cancelRecording') {
-    return 'Screen recording is not supported on shared remote-control tabs yet.'
+    return 'Screen recording is not supported over Remote control yet.'
   }
   // Remote peers must never close tabs by ownership key: the handler scans every local tab
   if (method === 'closeTabsForKey') {
     return 'Closing session tabs is not available over Remote control.'
   }
   if (method === 'ghost-browser') {
-    return 'Ghost Browser APIs are not available on shared remote-control tabs.'
+    return 'Ghost Browser APIs are not available over Remote control.'
   }
   return null
+}
+
+/**
+ * Tab group keys are relay session ids ("1", "2", ...). A remote relay counts
+ * its own sessions, so its keys are namespaced to never match local sessions.
+ */
+export function namespaceRemoteTabGroupKey(key: string | undefined): string | undefined {
+  return key ? `remote:${key}` : undefined
 }
 
 /** No upstream connected. Node `ws` still fires `open` (HTTP 101) first. */
@@ -389,15 +388,8 @@ export function getRemoteDialRetryMs(closeCode: number): number {
 }
 
 export const REMOTE_EXTENSION_NOT_CONNECTED_ERROR = dedent`
-  Could not reach the shared remote-control tab. The tunnel dropped. Ask the user to confirm Remote control is still on, then retry. If they clicked Stop sharing, they need to share a fresh id.
+  Could not reach the remote-control browser. The tunnel dropped. Ask the user to confirm Remote control is still on, then retry. If they clicked Stop sharing, they need to share a fresh id.
 `
-
-/** Error used when a command targets a tab outside the shared remote scope. */
-export function buildRemoteTabNotSharedError({ method, sessionId }: { method: string; sessionId?: string }): string {
-  return dedent`
-    Cannot run ${method}${sessionId ? ` (sessionId: ${sessionId})` : ''}: that tab is not shared over this remote-control link. You only have access to the tab the user shared (and popups it opened). Ask the user to share the other tab if you need it.
-  `
-}
 
 // ---------------------------------------------------------------------------
 // Prompt copied to the clipboard when the user enables remote control
@@ -405,7 +397,7 @@ export function buildRemoteTabNotSharedError({ method, sessionId }: { method: st
 
 export function buildRemoteControlPrompt({ id }: { id: string }): string {
   return dedent`
-    Connect to my shared Chrome tab:
+    Connect to my Chrome browser:
 
     npx -y playwriter@latest session new --remote ${id}
 

@@ -73,7 +73,7 @@ playwriter -s 1 -e 'state.page = context.pages().findLast((p) => p.url().include
 
 ### Tab groups
 
-Local extension sessions use a Chrome **tab group** named `playwriter` by default. Remote-control sessions move the shared tab into `remote`. Use the shortest clear single-word name with no spaces, such as `docs`, `shop`, `test`, or `scrape`.
+Local extension sessions use a Chrome **tab group** named `playwriter` by default. Remote-control sessions put the tabs they open into `remote`. Use the shortest clear single-word name with no spaces, such as `docs`, `shop`, `test`, or `scrape`.
 
 ```bash
 # Park a long scrape in its own group. The user can Move group to new window
@@ -313,28 +313,28 @@ Color-coded: yellow=links, orange=buttons, coral=inputs, pink=checkboxes, peach=
 +---------------------+     (no extension click)      +-----------------+
 ```
 
-## Remote Control (share a tab with a remote agent)
+## Remote Control (share your browser with a remote agent)
 
-Let a remote agent (Devin, a cloud bot, a friend's CLI agent) drive **one tab of your own browser** — no playwriter install needed on your machine, only the extension.
+Let a remote agent (Devin, a cloud bot, a friend's CLI agent) drive **your own browser**. No playwriter install needed on your machine, only the extension. The agent sees every Playwriter tab and can open new ones, like a local agent.
 
-1. Click the light-blue **Remote control** cloud button and confirm that the agent may read and control the tab
+1. Click the light-blue **Remote control** cloud button and confirm that the agent may read and control your browser
 2. A prompt containing a secret tunnel URL is copied to your clipboard — paste it to the agent
 3. The agent runs `playwriter session new --remote <id>` on its machine
-4. Open **Remote ON** and click **Stop sharing** anytime to **revoke**. The URL dies instantly.
+4. Open **Remote ON** in any Playwriter tab and click **Stop sharing** anytime to **revoke**. The URL dies instantly. Tabs the agent opened are detached and left open.
 
-Opening that same link in **any browser** shows a live, clickable view of the tab, so you can share with a person instead of an agent. The viewer page receives no tunnel id in its initial HTTP request because the id starts in the URL fragment. Its JavaScript then uses the id to connect to the tunnel path (`/tunnel/{id}/extension`), keeping the id out of DNS and TLS SNI.
+Opening that same link in **any browser** shows a live, clickable view of the tab where sharing started, so you can share with a person instead of an agent. The viewer page receives no tunnel id in its initial HTTP request because the id starts in the URL fragment. Its JavaScript then uses the id to connect to the tunnel path (`/tunnel/{id}/extension`), keeping the id out of DNS and TLS SNI.
 
 ```
 YOUR MACHINE (extension only)                        AGENT MACHINE (any box with npx)
 ┌───────────────────────────┐                       ┌────────────────────────────────┐
 │ Chrome + Extension        │   Cloudflare tunnel   │ playwriter CLI + local relay   │
-│  shared tab ◄─────────────┼───◄ playwriter.dev ◄──┼────── session new --remote     │
+│  Playwriter tabs ◄────────┼───◄ playwriter.dev ◄──┼────── session new --remote     │
 └───────────────────────────┘   /remote-control#id  └────────────────────────────────┘
 ```
 
-The shared tab is the **starting control surface**, not a security sandbox. Remote CDP access is powerful, so share the link only with a person or agent you fully trust. A short denylist blocks new-tab creation, explicit whole-profile cookie APIs, and obvious destructive clears, but it does not make a malicious recipient safe. The URL contains 128 bits of randomness and is never reusable after revocation.
+Remote control is **not a sandbox**. The agent gets the same access as a local Playwriter agent, so share the id only with a person or agent you fully trust. A short denylist blocks only whole-profile cookie APIs and cache clears, so an agent cannot wipe every login by accident. The id contains 128 bits of randomness and is never reusable after revocation.
 
-Scope enforcement is **best effort**, not a sandbox. The shared tab can navigate to other pages in your browser (including extension pages), and CDP evaluation there can reach other tabs and profile data. Expect that anyone you give a remote URL to can access more than the one shared tab.
+Sharing also ends when you close or disconnect the tab where you started it.
 
 Use case: you are logged into a website and want an agent to do work in your authenticated session without giving it your password.
 

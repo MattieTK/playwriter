@@ -4,8 +4,14 @@ declare global {
   var toggleExtensionForActiveTab: () => Promise<{ isConnected: boolean; state: ExtensionState }>
   var getExtensionState: () => ExtensionState
   var disconnectEverything: () => Promise<void>
-  var stopRemoteControlForTab: (tabId: number) => boolean
-  var getRemoteControlState: () => Array<{ rootTabId: number; url: string; status: string; scopeTabIds: number[] }>
+  var startRemoteControlForActiveTab: () => Promise<{ url: string }>
+  var stopRemoteControl: () => boolean
+  var getRemoteControlState: () => {
+    anchorTabId: number
+    url: string
+    status: string
+    remoteTabIds: number[]
+  } | null
 
   // Browser globals used in evaluate() calls
   var window: any

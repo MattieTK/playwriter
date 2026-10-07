@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createMCPClient } from './mcp-client.js'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { chromium } from '@xmorse/playwright-core'
+import { chromium, type Browser, type Page } from '@xmorse/playwright-core'
 import { getCdpUrl } from './utils.js'
 import { setupTestContext, cleanupTestContext, getExtensionServiceWorker, type TestContext, js } from './test-utils.js'
 import { getExtensionsStatus } from './relay-client.js'
@@ -169,10 +169,10 @@ describe('Extension Connection Tests', () => {
     const remoteState = await serviceWorker.evaluate(() => {
       return globalThis.getRemoteControlState()
     })
-    if (remoteState.length > 0) {
-      await serviceWorker.evaluate((tabId) => {
-        globalThis.stopRemoteControlForTab(tabId)
-      }, remoteState[0].rootTabId)
+    if (remoteState) {
+      await serviceWorker.evaluate(() => {
+        globalThis.stopRemoteControl()
+      })
     }
 
     // chrome.runtime.sendMessage broadcasts to every extension context, so the
@@ -244,7 +244,7 @@ describe('Extension Connection Tests', () => {
       stopRemote: 'function',
       toggleRemote: 'undefined',
     })
-    expect(remoteState).toEqual([])
+    expect(remoteState).toBeNull()
     expect(clipboard.result).toEqual({ success: true })
     expect(pinResult).toEqual({ pinNumber: 1 })
     expect(pinnedText).toContain('Example Domain')
@@ -284,26 +284,140 @@ describe('Extension Connection Tests', () => {
 
     try {
       await runRemoteAction('start')
-      await expect.poll(async () => serviceWorker.evaluate(() => globalThis.getRemoteControlState())).toHaveLength(1)
-      const [firstShare] = await serviceWorker.evaluate(() => globalThis.getRemoteControlState())
+      await expect
+        .poll(async () => serviceWorker.evaluate(() => globalThis.getRemoteControlState()?.url))
+        .toBeTruthy()
+      const firstShare = await serviceWorker.evaluate(() => globalThis.getRemoteControlState())
 
       await runRemoteAction('start')
       await expect
-        .poll(async () => serviceWorker.evaluate(() => globalThis.getRemoteControlState()[0]?.url))
-        .toBe(firstShare.url)
+        .poll(async () => serviceWorker.evaluate(() => globalThis.getRemoteControlState()?.url))
+        .toBe(firstShare?.url)
 
       await runRemoteAction('stop')
-      await expect.poll(async () => serviceWorker.evaluate(() => globalThis.getRemoteControlState())).toHaveLength(0)
+      await expect.poll(async () => serviceWorker.evaluate(() => globalThis.getRemoteControlState())).toBeNull()
     } finally {
       await serviceWorker.evaluate(() => {
-        const [share] = globalThis.getRemoteControlState()
-        if (share) {
-          globalThis.stopRemoteControlForTab(share.rootTabId)
-        }
+        globalThis.stopRemoteControl()
       })
       await page.close()
     }
   }, 60_000)
+
+  // Full Remote control flow through the real playwriter.dev tunnel: the remote
+  // relay sees every attached tab, opens new tabs, and loses access on Stop sharing.
+  it('lets a Remote control relay use every tab and open new ones', async () => {
+    const browserContext = getBrowserContext()
+    const serviceWorker = await getExtensionServiceWorker(browserContext)
+    const toggleActiveTab = async (page: Page) => {
+      await page.bringToFront()
+      await serviceWorker.evaluate(async () => {
+        await globalThis.toggleExtensionForActiveTab()
+      })
+    }
+    const anchor = await browserContext.newPage()
+    await anchor.goto('https://example.com/?anchor')
+    await toggleActiveTab(anchor)
+    const other = await browserContext.newPage()
+    await other.goto('https://example.com/?other')
+    await toggleActiveTab(other)
+    await anchor.bringToFront()
+
+    const { url } = await serviceWorker.evaluate(() => {
+      return globalThis.startRemoteControlForActiveTab()
+    })
+    const tunnelId = new URL(url).hash.slice(1)
+    let remoteBrowser: Browser | null = null
+    let sessionId: string | undefined
+    try {
+      const response = await fetch(`http://127.0.0.1:${TEST_PORT}/cli/session/new`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remoteControlUrl: tunnelId, cwd: os.tmpdir() }),
+      })
+      const session = (await response.json()) as { id?: string; mode?: string; extensionId?: string; error?: string }
+      expect(session.error, JSON.stringify(session)).toBeUndefined()
+      expect(session.mode).toBe('remote')
+      sessionId = session.id
+
+      remoteBrowser = await chromium.connectOverCDP(
+        getCdpUrl({ port: TEST_PORT, extensionId: session.extensionId, sessionId: session.id, tabGroup: 'remote' }),
+      )
+      const remoteContext = remoteBrowser.contexts()[0]
+      const remoteUrls = remoteContext.pages().map((page) => {
+        return page.url()
+      })
+      // The anchor tab is announced first, so it is context.pages()[0]
+      expect(remoteUrls[0]).toBe('https://example.com/?anchor')
+      expect(remoteUrls).toContain('https://example.com/?other')
+
+      const remoteOther = remoteContext.pages().find((page) => {
+        return page.url() === 'https://example.com/?other'
+      })
+      expect(await remoteOther?.evaluate(() => window.location.search)).toBe('?other')
+
+      const created = await remoteContext.newPage()
+      await created.goto('https://example.com/?created')
+      expect(await created.title()).toBe('Example Domain')
+
+      const cdp = await remoteContext.getExistingCDPSession(created)
+      await expect(cdp.send('Network.clearBrowserCookies')).rejects.toThrow(/not allowed over Remote control/)
+
+      const shared = await serviceWorker.evaluate(() => {
+        return globalThis.getRemoteControlState()
+      })
+      expect(shared?.remoteTabIds).toHaveLength(1)
+      const createdTabId = shared!.remoteTabIds[0]
+      // New tabs join the remote session group; its key never collides with local session ids
+      const createdGroup = await serviceWorker.evaluate(async (tabId) => {
+        const info = globalThis.getExtensionState().tabs.get(tabId)
+        const tab = await chrome.tabs.get(tabId)
+        return { groupTitle: info?.groupTitle, groupKey: info?.groupKey, active: tab.active }
+      }, createdTabId)
+      expect(createdGroup).toEqual({
+        groupTitle: 'remote',
+        // relay ownership key is `<relay instance uuid>:<session id>`
+        groupKey: expect.stringMatching(new RegExp(`^remote:[0-9a-f-]{36}:${sessionId}$`)),
+        active: false,
+      })
+
+      await serviceWorker.evaluate(() => {
+        globalThis.stopRemoteControl()
+      })
+      await remoteBrowser.close().catch(() => {})
+      remoteBrowser = null
+
+      // Stop sharing detaches tabs the remote opened but leaves them open
+      const afterStop = await serviceWorker.evaluate(async (tabId) => {
+        const state = globalThis.getExtensionState()
+        const tab = await chrome.tabs.get(tabId).catch(() => {
+          return null
+        })
+        return { attached: state.tabs.has(tabId), open: tab !== null }
+      }, createdTabId)
+      expect(afterStop).toEqual({ attached: false, open: true })
+    } finally {
+      await remoteBrowser?.close().catch(() => {})
+      await serviceWorker.evaluate(() => {
+        globalThis.stopRemoteControl()
+      })
+      if (sessionId) {
+        await fetch(`http://127.0.0.1:${TEST_PORT}/cli/session/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        })
+      }
+      const createdPages = browserContext.pages().filter((page) => {
+        return page.url() === 'https://example.com/?created'
+      })
+      await Promise.all(
+        [anchor, other, ...createdPages].map((page) => {
+          return page.close()
+        }),
+      )
+    }
+  }, 120_000)
 
   // Clicks the real button instead of calling the handler, so the trusted-click guard
   // stays covered. Keep example.com: it ships `div{opacity:0.8}`, which once matched the

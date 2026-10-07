@@ -148,9 +148,10 @@ class CdpClient {
  * Find the page session to drive.
  *
  * raw: discover targets and attach ourselves.
- * extension: the extension pushes `Target.attachedToTarget` for the shared tab
- * right after `hello`, so we only listen. There is nothing to attach to, and
- * `Target.attachToTarget` is not part of the shared-tab surface.
+ * extension: right after `hello` the extension pushes `Target.attachedToTarget`
+ * for every attached tab, the tab where sharing started first. We show that first
+ * one. There is nothing to attach to, and `Target.attachToTarget` is not part of
+ * the extension surface.
  */
 function attachToPage({ cdp, transport, timeoutMs = 15_000 }: { cdp: CdpClient; transport: CdpTransport; timeoutMs?: number }): Promise<{ sessionId: string; url: string }> {
   if (transport === 'raw') {

@@ -203,15 +203,15 @@ The agent connects from any machine:
 playwriter session new --remote <id>
 ```
 
-The user needs no playwriter install — only the extension. The selected tab is the starting control
-surface, not a security sandbox. The recipient gets broad CDP access and must be fully trusted. The
+The user needs no playwriter install, only the extension. The agent can use every Playwriter tab and
+open new ones. It is not a security sandbox: the recipient must be fully trusted. The
 user revokes access anytime with **Stop sharing** on the Remote ON dropdown. See [Remote Access](/docs/remote-access)
 for details.
 
 | | Cloud browser | Remote control |
 | --- | --- | --- |
 | **Logins** | fresh profile, none | user's real sessions |
-| **Scope** | full browser | high-trust CDP access starting from one tab |
+| **Scope** | full browser | every Playwriter tab, plus new tabs |
 | **Stealth/proxies** | yes | no (real user browser) |
 | **User setup** | none | extension + one click |
 
