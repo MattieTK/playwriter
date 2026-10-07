@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.8.0
+
+1. **Remote control shares the browser, not one tab** — a remote agent connected with `playwriter session new --remote <id>` now gets the same access as a local agent. It sees and drives every tab where Playwriter is enabled, and opens new background tabs with `context.newPage()` in the session's `remote` tab group. `context.pages()[0]` is still the tab where sharing started.
+
+   ```bash
+   playwriter session new --remote <id>
+   playwriter -s 1 -e "state.page = await context.newPage(); await state.page.goto('https://example.com')"
+   ```
+
+   Whole-profile cookie APIs (`Network.getAllCookies`, `Network.clearBrowserCookies`, `Storage.*Cookies`) and `Network.clearBrowserCache` stay blocked, so an agent cannot wipe every login by accident. Remote control is still not a sandbox: share the id only with agents you fully trust.
+
+   **Stop sharing** works from the Remote ON dropdown of any Playwriter tab and closes the tunnel immediately. Tabs the remote agent opened are detached and left open. Sharing also ends when the tab where it started is closed. Remote sessions only regroup or rename tabs they opened, and never touch the tabs of a local session with the same id.
+
+2. **Breaking: no default `page` global, Playwriter never opens tabs on its own** — before, every execute call made sure a default page existed and opened `about:blank` when no tab was open, even when your code never used `page`. Now reading `page` throws with a hint, the relay no longer auto-creates a tab, headless and direct CDP sessions start without a tab, and `PLAYWRITER_AUTO_ENABLE` is removed. Store your own page in `state`:
+
+   ```js
+   // new tab
+   state.page = await context.newPage()
+   await state.page.goto('https://example.com')
+
+   // a tab the user already opened (last match = most recently opened)
+   state.page = context.pages().findLast((p) => p.url().includes('example.com'))
+
+   await snapshot({ page: state.page })
+   ```
+
+   Helpers now need an explicit page: `snapshot` (also accepts a `locator` or `frame`), `getLatestLogs`, `waitForPageLoad`, `refToLocator`, `screenshotWithAccessibilityLabels`, `getPageMarkdown`, `ghostCursor.*`, `recording.*`, `stream.*`, and `cloud.sendCookies({ from })`. `playwriter stream start` streams `state.page`; `stream stop` and `stream status` also work after a session reset. `reset` no longer reports a current page URL.
+
+3. **`connectViaExtension()` closes only its own tabs, supports `await using`, and can keep tabs** — the connection closes automatically at scope end, also when code throws. `close()` closes only the tabs that connection opened, plus popups they opened, so two SDK scripts or an SDK script next to a CLI session no longer close each other's tabs. Pass `closeTabsOnEnd: false` to keep the tabs, so a later process can reuse them:
+
+   ```ts
+   import { connectViaExtension } from 'playwriter'
+
+   // process A
+   await using a = await connectViaExtension({ tabGroup: 'job', closeTabsOnEnd: false })
+   await (await a.browser.contexts()[0].newPage()).goto('https://example.com')
+
+   // process B, later
+   await using b = await connectViaExtension({ tabGroup: 'job' })
+   const page = b.browser.contexts()[0].pages().findLast((p) => p.url().includes('example.com'))
+   ```
+
+   `await using` needs Node 24+, or TypeScript 5.2+ / tsx. Tab cleanup needs the latest extension; older extensions leave the tabs open and log a warning. `deleteRelaySession({ sessionId, closeCreatedTabs: true })` exposes the same cleanup for custom clients. Popups opened from a session's tab now belong to that session, so `session update --tab-group` moves them too. After a relay restart, a new session `1` never owns or closes the tabs of an older session `1`.
+
+   The recorder instructions and `playwriter skill` now show how to turn a recording into a standalone typed SDK with `connectViaExtension`. See https://playwriter.dev/docs/sessions#node-api.
+
+4. **Pick a browser with `selectBrowser` and `listBrowsers()`** — when the extension runs in more than one browser or profile, choose which one `connectViaExtension()` controls:
+
+   ```ts
+   import { connectViaExtension, listBrowsers } from 'playwriter'
+
+   await using connection = await connectViaExtension({
+     selectBrowser: (browsers) => {
+       // [{ id, browser: 'Brave', email: 'me@work.com', activeTabs, playwriterVersion }]
+       return browsers.find((b) => b.browser === 'Brave' && b.email === 'me@work.com')
+     },
+   })
+
+   // same list, without connecting
+   const browsers = await listBrowsers()
+   ```
+
+   `id` is stable across restarts, so you can save it. Without `selectBrowser`, connecting with several browsers fails with a list of connected browsers.
+
+5. **Anonymous usage stats** — the local relay sends event names, a random install id, the Playwriter version, OS, session kind, and hourly execute counts to [Strada](https://strada.sh). It never sends code, URLs, page content, emails, or hostnames. The CLI prints a one-time notice. Opt out, then restart the relay:
+
+   ```bash
+   export PLAYWRITER_TELEMETRY=0   # or DO_NOT_TRACK=1
+   playwriter serve restart
+   ```
+
+6. **One clear "extension not connected" error** — `playwriter session new`, `playwriter -e` and `connectViaExtension()` print the same message, written so an agent can pass the install steps to the user. The text and the install URL are exported as `EXTENSION_NOT_CONNECTED_ERROR` and `PLAYWRITER_EXTENSION_URL`.
+
+7. **Simpler extension welcome page** — leads with a short blurb and a "Copy agent prompt to install" button that copies a prompt telling your coding agent to install the Playwriter skill. Full setup docs moved into a collapsible section. The tutorial page is shorter.
+
+8. **Fixed agent clicks blocked by the in-page toolbar** — `locator.click()`, `hover()`, `tap()` and `dragTo()` on elements under the toolbar no longer fail with `<div data-playwriter-toolbar> intercepts pointer events`. Toolbar buttons are no longer focusable, so agent `Tab`, `Enter` or `Space` presses can never trigger them. Needs the latest extension. Fixes #126.
+
+9. **Fixed `PLAYWRITER_TOKEN` being ignored by auto-started relays** — the relay that the CLI and MCP start in the background now enforces the token on privileged requests, the same as `playwriter serve`. Fixes #119.
+
+10. **Fixed enabling a tab while the extension reconnects** — the tab was attached twice, failed with `Another debugger is already attached`, and later commands such as `recorder start` failed with `No tab found`.
+
 ## 0.7.0
 
 1. **Remote-control tunnels use path-based URLs** — the share id now travels as `wss://playwriter.dev/tunnel/{id}/extension` (upstream dials `wss://playwriter.dev/tunnel/{id}/upstream`), so it no longer leaks through DNS queries or TLS SNI. Subdomain URLs (`{id}-tunnel.playwriter.dev`) still work so older extensions keep connecting.
