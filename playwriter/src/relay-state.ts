@@ -76,6 +76,8 @@ export type PlaywrightClient = {
   tabGroup?: string
   /** Explicit tab group color (from the ?tabGroupColor= query param) */
   tabGroupColor?: TabGroupColor
+  /** Tab index identity: the session id, or `mcp:<id>` for MCP servers (see tab-index.ts) */
+  agentKey?: string
 }
 
 export type RelayState = {
@@ -236,6 +238,7 @@ export function addPlaywrightClient(
     sessionId,
     tabGroup,
     tabGroupColor,
+    agentKey,
   }: {
     id: string
     extensionId: string | null
@@ -243,10 +246,11 @@ export function addPlaywrightClient(
     sessionId?: string
     tabGroup?: string
     tabGroupColor?: TabGroupColor
+    agentKey?: string
   },
 ): RelayState {
   const newClients = new Map(state.playwrightClients)
-  newClients.set(id, { id, extensionId, ws, sessionId, tabGroup, tabGroupColor })
+  newClients.set(id, { id, extensionId, ws, sessionId, tabGroup, tabGroupColor, agentKey })
   return { ...state, playwrightClients: newClients }
 }
 
