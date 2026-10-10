@@ -1352,3 +1352,146 @@ describe('Agent pages survive an extension reconnect', () => {
     `)
   }, 120000)
 })
+
+describe('Extension re-attaches tabs it lost', () => {
+  const PORT = 19983
+  let testCtx: TestContext | null = null
+  let mcp: Awaited<ReturnType<typeof createMCPClient>> | null = null
+
+  beforeAll(async () => {
+    testCtx = await setupTestContext({ port: PORT, tempDirPrefix: 'pw-reattach-test-', toggleExtension: true })
+    mcp = await createMCPClient({ port: PORT })
+  }, 600000)
+
+  afterAll(async () => {
+    await mcp?.cleanup()
+    await cleanupTestContext(testCtx, null)
+    testCtx = null
+  })
+
+  const execute = async (code: string) => {
+    const result = (await mcp!.client.callTool({ name: 'execute', arguments: { code } })) as {
+      content: Array<{ text: string }>
+      isError?: boolean
+    }
+    return { text: result.content[0].text, isError: Boolean(result.isError) }
+  }
+
+  // Re-resolves the service worker on every attempt: it may be restarted mid-wait
+  const waitForExtension = async (predicate: string) => {
+    for (let i = 0; i < 100; i++) {
+      const matched = await (async () => {
+        try {
+          const serviceWorker = await getExtensionServiceWorker(testCtx!.browserContext)
+          return await serviceWorker.evaluate((source) => {
+            const check = new Function('state', `return (${source})(state)`) as (state: unknown) => boolean
+            return check(globalThis.getExtensionState())
+          }, predicate)
+        } catch {
+          return false
+        }
+      })()
+      if (matched) {
+        return true
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    return false
+  }
+
+  // Chrome drops the debugger (reason target_closed) when a tab navigates to a page
+  // extensions can't debug, while the tab itself stays open.
+  it('re-attaches a tab after Chrome drops its debugger and keeps state.page', async () => {
+    const opened = await execute(js`
+      state.page = await context.newPage();
+      await state.page.goto('https://example.com/?reattach-detach');
+      return state.page.url();
+    `)
+    expect(opened.isError).toBe(false)
+
+    const tab = testCtx!.browserContext.pages().find((p) => p.url().includes('reattach-detach'))!
+    await tab.goto('chrome://version')
+    expect(await waitForExtension(`(s) => s.tabs.size === 1`)).toBe(true)
+    await tab.goto('https://example.com/?reattach-detach-back')
+    expect(await waitForExtension(`(s) => s.tabs.size === 2 && [...s.tabs.values()].every((t) => t.state === 'connected')`)).toBe(true)
+
+    const after = await execute(js`
+      const tabs = context.pages().filter((p) => p.url().includes('reattach-detach')).length;
+      return { url: state.page.url(), closed: state.page.isClosed(), tabs };
+    `)
+    expect(after).toMatchInlineSnapshot(`
+      {
+        "isError": false,
+        "text": "[WARNING] The connection to the tab behind state.page (https://example.com/?reattach-detach) dropped and was restored. state.page points at the same tab again, keep using it.
+      [return value] {
+        url: 'https://example.com/?reattach-detach-back',
+        closed: false,
+        tabs: 1
+      }",
+      }
+    `)
+  }, 120000)
+
+  it('re-attaches tabs after the extension service worker restarts', async () => {
+    const opened = await execute(js`
+      state.swPage = await context.newPage();
+      await state.swPage.goto('https://example.com/?reattach-sw');
+      return state.swPage.url();
+    `)
+    expect(opened.isError).toBe(false)
+
+    // Stop the extension's service worker the way Chrome does when it reaps an
+    // idle worker: through the ServiceWorker domain of a page in its origin.
+    const serviceWorker = await getExtensionServiceWorker(testCtx!.browserContext)
+    // URL.origin is "null" for chrome-extension:// URLs
+    const extensionOrigin = serviceWorker.url().split('/').slice(0, 3).join('/')
+    const extensionPage = await testCtx!.browserContext.newPage()
+    await extensionPage.goto(`${extensionOrigin}/src/tutorial.html`)
+    const cdp = await testCtx!.browserContext.newCDPSession(extensionPage)
+    const versions: Array<{ versionId: string; runningStatus: string }> = []
+    cdp.on('ServiceWorker.workerVersionUpdated', (event: { versions: Array<{ versionId: string; runningStatus: string }> }) => {
+      versions.push(...event.versions)
+    })
+    await cdp.send('ServiceWorker.enable')
+    await new Promise((r) => setTimeout(r, 500))
+    const running = versions.find((v) => v.runningStatus === 'running')
+    expect(running).toBeTruthy()
+    await cdp.send('ServiceWorker.stopWorker', { versionId: running!.versionId })
+    await extensionPage.close()
+
+    // Nothing restarts a stopped worker until Chrome delivers it an event, like the
+    // user switching tabs. Activating the agent's tab wakes it.
+    await new Promise((r) => setTimeout(r, 1000))
+    await testCtx!.browserContext
+      .pages()
+      .find((p) => p.url().includes('reattach-sw'))!
+      .bringToFront()
+    // Playwright does not pick up the restarted worker, so poll the relay instead
+    const restored = await (async () => {
+      for (let i = 0; i < 100; i++) {
+        const status = (await fetch(`http://127.0.0.1:${PORT}/extension/status`)
+          .then((r) => r.json())
+          .catch(() => ({}))) as { connected?: boolean; activeTargets?: number }
+        if (status.connected && (status.activeTargets || 0) >= 3) {
+          return true
+        }
+        await new Promise((r) => setTimeout(r, 200))
+      }
+      return false
+    })()
+    expect(restored).toBe(true)
+
+    const after = await execute(js`
+      const tabs = context.pages().filter((p) => p.url().includes('reattach-sw')).length;
+      return { url: state.swPage.url(), closed: state.swPage.isClosed(), tabs };
+    `)
+    expect(after).toMatchInlineSnapshot(`
+      {
+        "isError": false,
+        "text": "[WARNING] The connection to the tab behind state.page (https://example.com/?reattach-detach-back) dropped and was restored. state.page points at the same tab again, keep using it.
+      [WARNING] The connection to the tab behind state.swPage (https://example.com/?reattach-sw) dropped and was restored. state.swPage points at the same tab again, keep using it.
+      [return value] { url: 'https://example.com/?reattach-sw', closed: false, tabs: 1 }",
+      }
+    `)
+  }, 120000)
+})
