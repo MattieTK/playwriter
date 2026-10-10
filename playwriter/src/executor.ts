@@ -297,6 +297,11 @@ const MAX_LOGS_PER_PAGE = 5000
 const RECONNECT_WINDOW_MS = 30_000
 /** How long to wait at the start of a call for tabs to be re-attached after a disconnect. */
 const RECONNECT_REBIND_WAIT_MS = 10_000
+/** Wait for a single page that dropped recently: the extension re-attaches tabs Chrome
+ *  detached while open, which takes seconds in a busy Chrome, and Playwright then
+ *  needs a moment to initialize the new Page before context.pages() lists it. */
+const RECENT_LOSS_WINDOW_MS = 15_000
+const RECENT_LOSS_REBIND_WAIT_MS = 5000
 /** How long an unrecovered page in state can still be re-bound if its tab comes back. */
 const LOST_PAGE_TTL_MS = 10 * 60_000
 
@@ -795,6 +800,17 @@ export class PlaywrightExecutor {
 
   private hasRecentBrowserDisconnect(): boolean {
     return Date.now() - this.lastBrowserDisconnectAt < RECONNECT_WINDOW_MS
+  }
+
+  /** How long the start of a call waits for lost state pages to come back. */
+  private rebindWaitMs(): number {
+    if (this.hasRecentBrowserDisconnect()) {
+      return RECONNECT_REBIND_WAIT_MS
+    }
+    const recentUnreportedLoss = this.lostStatePages.some((lost) => {
+      return !lost.reported && Date.now() - lost.lostAt < RECENT_LOSS_WINDOW_MS
+    })
+    return recentUnreportedLoss ? RECENT_LOSS_REBIND_WAIT_MS : 0
   }
 
   /**
@@ -1380,10 +1396,7 @@ export class PlaywrightExecutor {
       }
 
       const { context } = await this.ensureConnection()
-      await this.recoverLostStatePages({
-        context,
-        waitMs: this.hasRecentBrowserDisconnect() ? RECONNECT_REBIND_WAIT_MS : 0,
-      })
+      await this.recoverLostStatePages({ context, waitMs: this.rebindWaitMs() })
 
       this.logger.log('Executing code:', code)
 

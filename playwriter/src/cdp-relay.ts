@@ -1778,6 +1778,36 @@ export async function startPlayWriterCDPRelayServer({
               // Check if we already sent this target to clients (e.g., from Target.setAutoAttach response)
               const alreadyConnected = currentExtState?.connectedTargets.has(targetParams.sessionId) ?? false
 
+              // The same tab re-attached under a new sessionId while its old session is still
+              // registered (overlapping reconnect attempts). Playwright asserts on a duplicate
+              // targetId and the whole client dies ("Duplicate target"), so retire the old
+              // session first: clients see a detach + attach, which executors re-bind by targetId.
+              const staleSessions = Array.from(currentExtState?.connectedTargets.values() || []).filter((target) => {
+                return (
+                  targetParams.targetInfo.type === 'page' &&
+                  target.targetId === targetParams.targetInfo.targetId &&
+                  target.sessionId !== targetParams.sessionId
+                )
+              })
+              for (const stale of staleSessions) {
+                logger?.log(
+                  pc.yellow(
+                    `[Server] Target ${stale.targetId} re-attached as ${targetParams.sessionId}, retiring stale session ${stale.sessionId}`,
+                  ),
+                )
+                store.setState((s) => {
+                  return relayState.removeTarget(s, { extensionId: connectionId, sessionId: stale.sessionId })
+                })
+                sendToPlaywright({
+                  message: {
+                    method: 'Target.detachedFromTarget',
+                    params: { sessionId: stale.sessionId, targetId: stale.targetId },
+                  } satisfies CDPEventFor<'Target.detachedFromTarget'>,
+                  source: 'server',
+                  extensionId: connectionId,
+                })
+              }
+
               // State transition: add/update target
               store.setState((s) =>
                 relayState.addTarget(s, {
