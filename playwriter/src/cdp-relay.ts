@@ -303,6 +303,20 @@ export async function startPlayWriterCDPRelayServer({
     }
   }
 
+  function buildAttachedToTargetEvent(target: relayState.ConnectedTarget): CDPEventFor<'Target.attachedToTarget'> {
+    return {
+      method: 'Target.attachedToTarget',
+      params: {
+        sessionId: target.sessionId,
+        targetInfo: {
+          ...target.targetInfo,
+          attached: true,
+        },
+        waitingForDebugger: false,
+      },
+    }
+  }
+
   function sendToPlaywright({
     message,
     clientId,
@@ -1295,17 +1309,7 @@ export async function startPlayWriterCDPRelayServer({
                 if (isRestrictedTarget(target.targetInfo)) {
                   continue
                 }
-                const attachedPayload = {
-                  method: 'Target.attachedToTarget',
-                  params: {
-                    sessionId: target.sessionId,
-                    targetInfo: {
-                      ...target.targetInfo,
-                      attached: true,
-                    },
-                    waitingForDebugger: false,
-                  },
-                } satisfies CDPEventFor<'Target.attachedToTarget'>
+                const attachedPayload = buildAttachedToTargetEvent(target)
                 if (!target.targetInfo.url) {
                   logger?.error(
                     pc.red('[Server] WARNING: Target.attachedToTarget sent with empty URL!'),
@@ -1995,12 +1999,45 @@ export async function startPlayWriterCDPRelayServer({
                 `Rebinding clients from ${connectionId} to ${successorExtension.id} (stableKey: ${successorExtension.stableKey})`,
               ),
             )
+            const reboundClientIds = Array.from(store.getState().playwrightClients.values())
+              .filter((client) => {
+                return client.extensionId === connectionId
+              })
+              .map((client) => {
+                return client.id
+              })
             store.setState((s) => {
               return relayState.rebindClientsToExtension(s, {
                 fromExtensionId: connectionId,
                 toExtensionId: successorExtension.id,
               })
             })
+            // The successor re-attached the same tabs under new sessionIds, and its
+            // attachedToTarget events were sent before these clients were bound to it.
+            // Without this, rebound clients keep pages whose sessions no longer exist.
+            // Detach the old sessions and announce the successor's current targets so
+            // Playwright sees the same tabs (same targetId) come back as new pages.
+            const oldTargets = Array.from(closingExtension?.connectedTargets.values() || [])
+            const successorTargets = Array.from(
+              store.getState().extensions.get(successorExtension.id)?.connectedTargets.values() || [],
+            ).filter((target) => {
+              return !isRestrictedTarget(target.targetInfo)
+            })
+            for (const clientId of reboundClientIds) {
+              for (const target of oldTargets) {
+                sendToPlaywright({
+                  message: {
+                    method: 'Target.detachedFromTarget',
+                    params: { sessionId: target.sessionId, targetId: target.targetId },
+                  } satisfies CDPEventFor<'Target.detachedFromTarget'>,
+                  clientId,
+                  source: 'server',
+                })
+              }
+              for (const target of successorTargets) {
+                sendToPlaywright({ message: buildAttachedToTargetEvent(target), clientId, source: 'server' })
+              }
+            }
           }
 
           // Close playwright clients bound to this extension when no successor exists.
